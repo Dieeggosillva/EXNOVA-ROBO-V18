@@ -1,0 +1,168 @@
+
+/* =========================================
+   EXNOVA ROBO V18
+   MODULO DE CONEXAO EUR/USD
+   Fonte: Biquote API
+   ========================================= */
+
+(function () {
+  "use strict";
+
+  const API = "https://biquote.io/api";
+  const SYMBOL = "EURUSD";
+
+  let timerQuote = null;
+  let timerCandles = null;
+  let connected = false;
+
+  const data = {
+    symbol: SYMBOL,
+    quote: null,
+    candlesM1: [],
+    candlesM5: [],
+    connected: false,
+    lastUpdate: null,
+    error: null
+  };
+
+  async function request(url) {
+    const response = await fetch(url, {
+      method: "GET",
+      cache: "no-store"
+    });
+
+    if (!response.ok) {
+      throw new Error("Erro HTTP: " + response.status);
+    }
+
+    return await response.json();
+  }
+
+  async function getQuote() {
+    const result = await request(
+      API + "/" + SYMBOL + "?allowStale=false"
+    );
+
+    if (
+      result.mid == null ||
+      result.stale === true ||
+      result.marketState === "closed"
+    ) {
+      throw new Error("Cotação indisponível ou desatualizada.");
+    }
+
+    data.quote = result;
+    data.lastUpdate = new Date().toISOString();
+    data.error = null;
+
+    return result;
+  }
+
+  async function getCandles(interval) {
+    const result = await request(
+      API + "/" + SYMBOL +
+      "/ohlc?interval=" + interval + "&limit=300"
+    );
+
+    if (!result.bars || !Array.isArray(result.bars)) {
+      throw new Error("Formato de candles inválido.");
+    }
+
+    return result.bars
+      .slice()
+      .sort((a, b) =>
+        new Date(a.openTime) - new Date(b.openTime)
+      );
+  }
+
+  async function updateCandles() {
+    const results = await Promise.all([
+      getCandles("1m"),
+      getCandles("5m")
+    ]);
+
+    data.candlesM1 = results[0];
+    data.candlesM5 = results[1];
+
+    return data;
+  }
+
+  async function updateAll() {
+    try {
+      await getQuote();
+      await updateCandles();
+
+      data.connected = true;
+      data.error = null;
+      connected = true;
+
+      console.log("EXNOVA V18: dados atualizados", data);
+
+      if (typeof window.onExnovaData === "function") {
+        window.onExnovaData(data);
+      }
+
+      return data;
+
+    } catch (error) {
+      data.error = error.message;
+
+      console.error("EXNOVA V18:", error);
+
+      if (typeof window.onExnovaError === "function") {
+        window.onExnovaError(error);
+      }
+
+      return null;
+    }
+  }
+
+  async function start() {
+    stop();
+
+    await updateAll();
+
+    timerQuote = setInterval(async function () {
+      try {
+        await getQuote();
+
+        if (typeof window.onExnovaData === "function") {
+          window.onExnovaData(data);
+        }
+      } catch (error) {
+        data.error = error.message;
+        console.error(error);
+      }
+    }, 5000);
+
+    timerCandles = setInterval(updateAll, 15000);
+
+    return data;
+  }
+
+  function stop() {
+    if (timerQuote) clearInterval(timerQuote);
+    if (timerCandles) clearInterval(timerCandles);
+
+    timerQuote = null;
+    timerCandles = null;
+    connected = false;
+    data.connected = false;
+  }
+
+  window.ExnovaConnection = {
+    start: start,
+    stop: stop,
+    update: updateAll,
+    getData: function () {
+      return data;
+    },
+    isConnected: function () {
+      return connected;
+    }
+  };
+
+  console.log("EXNOVA V18: módulo de conexão carregado.");
+
+})();
+      
