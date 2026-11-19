@@ -1,0 +1,155 @@
+
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EXNOVA V18 - Teste de Conexão</title>
+<style>
+body {
+  margin: 0;
+  padding: 20px;
+  background: #10151f;
+  color: white;
+  font-family: Arial, sans-serif;
+}
+h2 { color: #42a5ff; }
+.card {
+  background: #202b3a;
+  padding: 15px;
+  margin: 12px 0;
+  border-radius: 10px;
+}
+.valor {
+  font-size: 23px;
+  font-weight: bold;
+  color: #40df91;
+}
+button {
+  width: 100%;
+  padding: 15px;
+  border: 0;
+  border-radius: 8px;
+  background: #1685e8;
+  color: white;
+  font-size: 16px;
+  font-weight: bold;
+}
+#log {
+  white-space: pre-wrap;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+</style>
+</head>
+<body>
+
+<h2>EXNOVA ROBÔ V18</h2>
+<p>Teste independente de conexão EUR/USD</p>
+
+<div class="card">
+  Estado:
+  <div id="estado">Aguardando teste...</div>
+</div>
+
+<div class="card">
+  EUR/USD
+  <div class="valor" id="preco">---</div>
+  <div id="horario">Aguardando cotação</div>
+</div>
+
+<div class="card">
+  <b>Candles M1</b>
+  <div id="m1">Não testado</div>
+</div>
+
+<div class="card">
+  <b>Candles M5</b>
+  <div id="m5">Não testado</div>
+</div>
+
+<button onclick="testar()">TESTAR CONEXÃO</button>
+
+<div class="card">
+  <b>Registro de testes</b>
+  <div id="log">Pronto para iniciar.</div>
+</div>
+
+<script>
+async function buscar(url) {
+  const resposta = await fetch(url, {
+    cache: "no-store"
+  });
+
+  if (!resposta.ok) {
+    throw new Error("Erro HTTP " + resposta.status);
+  }
+
+  return await resposta.json();
+}
+
+async function testar() {
+  const estado = document.getElementById("estado");
+  const log = document.getElementById("log");
+
+  estado.textContent = "Conectando...";
+  log.textContent = "Iniciando testes...\n";
+
+  try {
+    const cotacao = await buscar(
+      "https://biquote.io/api/EURUSD"
+    );
+
+    if (typeof cotacao.mid !== "number") {
+      throw new Error("Cotação inválida");
+    }
+
+    document.getElementById("preco").textContent =
+      cotacao.mid.toFixed(5);
+
+    document.getElementById("horario").textContent =
+      "Fonte: " + cotacao.source +
+      " | Idade: " + cotacao.quoteAgeSeconds + " segundos";
+
+    log.textContent += "COTAÇÃO: OK\n";
+
+    const dadosM1 = await buscar(
+      "https://biquote.io/api/EURUSD/ohlc?interval=1m&limit=100"
+    );
+
+    if (!Array.isArray(dadosM1.bars)) {
+      throw new Error("Formato M1 inválido");
+    }
+
+    document.getElementById("m1").textContent =
+      dadosM1.bars.length + " velas recebidas";
+
+    log.textContent += "M1: OK\n";
+
+    const dadosM5 = await buscar(
+      "https://biquote.io/api/EURUSD/ohlc?interval=5m&limit=100"
+    );
+
+    if (!Array.isArray(dadosM5.bars)) {
+      throw new Error("Formato M5 inválido");
+    }
+
+    document.getElementById("m5").textContent =
+      dadosM5.bars.length + " velas recebidas";
+
+    log.textContent += "M5: OK\n";
+
+    estado.textContent = "CONEXÃO TESTADA";
+
+    log.textContent +=
+      "\nTodos os três pedidos foram respondidos.";
+
+  } catch (erro) {
+    estado.textContent = "ERRO NA CONEXÃO";
+    log.textContent += "\nERRO: " + erro.message;
+  }
+}
+</script>
+
+</body>
+</html>
