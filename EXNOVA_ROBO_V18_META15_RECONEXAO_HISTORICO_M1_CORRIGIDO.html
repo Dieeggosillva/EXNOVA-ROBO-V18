@@ -1,0 +1,719 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>EXNOVA ROBÔ V18 - DERIV DEMO</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;padding:16px;background:#10151f;color:#fff;font-family:Arial,sans-serif}
+header{text-align:center;padding:15px}
+h1{color:#36d399}
+.card{background:#1b2636;padding:16px;border-radius:12px;margin:14px 0}
+textarea{width:100%;height:130px;background:#10151f;color:white;border:1px solid #526078;border-radius:8px;padding:10px}
+button{width:100%;padding:15px;background:#16a36a;color:white;border:0;border-radius:8px;font-weight:bold;font-size:16px;margin-top:12px}
+button:disabled{opacity:.5}
+.metric{font-size:20px;color:#36d399;font-weight:bold}
+#signal{font-size:20px;font-weight:bold}
+small{color:#aab6c5}
+.ok{color:#36d399}
+.erro{color:#ff6464}
+.azul{color:#00D5FF}
+.roxo{color:#B060FF}
+.verde{color:#00FF66}
+.vermelho{color:#FF6464}
+.item{padding:8px;margin:5px 0;background:#10151f;border-radius:7px}
+</style>
+</head>
+<body>
+<header>
+<h1>EXNOVA ROBÔ V18</h1>
+<p>Motor estratégico — validação + gerenciamento em teste</p>
+<p id="status">AGUARDANDO DADOS</p>
+</header>
+
+<div class="card">
+<h3>Configuração</h3>
+<p>Ativo: <b>Volatility 100 (1s) — 1HZ100V</b></p>
+<p>Execução: <b>M1 — análise de velas de 1 minuto</b></p>
+<p>Confirmação: <b>M5</b></p>
+<p>Indicadores: EMA 9 / EMA 21 / RSI 14</p>
+<p>Pré-alertas originais: <b>3 velas</b></p>
+<p>Pré-alertas estratégicos: <b>5 velas</b></p>
+</div>
+
+<div class="card">
+<h3>Conexão Deriv — dados públicos</h3>
+<p id="apiStatus">API: DESCONECTADA</p>
+<p id="ultimaAtualizacao">Última atualização: --</p>
+<p id="testeM1">Velas M1: --</p>
+<p id="testeM5">Velas M5: --</p>
+<button onclick="conectarDeriv()">CONECTAR À DERIV — VOLATILITY 100 (1s)</button>
+<button onclick="desconectarDeriv()">PARAR ATUALIZAÇÃO</button>
+<small>Fonte: transmissão pública de cotações da Deriv. Esta etapa não usa token e não envia ordens.</small>
+</div>
+
+<div class="card">
+<h3>Teste de dados simulados</h3>
+<p id="testeStatus">Aguardando teste...</p>
+<button onclick="carregarTeste()">CARREGAR TESTE AUTOMÁTICO</button>
+<small>Gera velas simuladas. Não são dados reais e não servem para validar desempenho.</small>
+</div>
+
+<div class="card">
+<h3>Velas M1</h3>
+<small>Dados recebidos da API.</small>
+<textarea id="m1" placeholder="Velas M1"></textarea>
+</div>
+
+<div class="card">
+<h3>Velas M5</h3>
+<small>Somente velas M5 completas, construídas a partir das M1.</small>
+<textarea id="m5" placeholder="Velas M5"></textarea>
+</div>
+
+<button onclick="analisar()">ANALISAR MERCADO</button>
+
+<div class="card">
+<h3>Indicadores M1</h3>
+<p>EMA 9: <span id="ema9" class="metric">--</span></p>
+<p>EMA 21: <span id="ema21" class="metric">--</span></p>
+<p>RSI 14: <span id="rsi" class="metric">--</span></p>
+</div>
+
+<div class="card">
+<h3>Confirmação M5</h3>
+<p id="trend" class="metric">--</p>
+<p id="lateral">Mercado lateral: --</p>
+</div>
+
+<div class="card">
+<h3>Central de sinais</h3>
+<p id="signal">AGUARDANDO DADOS</p>
+<div id="details"></div>
+</div>
+
+
+<div class="card" id="gestaoOperacoes">
+<h3>Gerenciamento de operações — TESTE</h3>
+<p class="erro"><b>MODO DE TESTE:</b> este painel não envia ordens à Deriv.</p>
+<p>Valor inicial: <b>US$ 1</b> | Meta diária líquida: <b>US$ 15</b></p>
+<p>Progressão: <b>US$ 1 → US$ 2 → US$ 6 → US$ 18</b></p>
+<p>Parada por perda: <b>4 perdas consecutivas</b> (entrada inicial + 3 gales)</p>
+<p id="gestaoStatus" class="ok">Aguardando o primeiro pré-alerta válido.</p>
+<p id="gestaoEtapa">Próxima entrada: US$ 1 (inicial)</p>
+<p id="gestaoContagem">Operações hoje: 0 | Perdas consecutivas: 0/4</p>
+<p id="gestaoTotal">Lucro acumulado nas vitórias: US$ 0,00 / Meta: US$ 15,00</p>
+<button type="button" onclick="testeNovoPreAlerta()">SIMULAR NOVO PRÉ-ALERTA VÁLIDO</button>
+<label for="resultadoLiquido" style="display:block;margin-top:12px">Lucro ou perda da operação (US$): informe o lucro líquido positivo na vitória ou o valor negativo na perda</label>
+<input id="resultadoLiquido" type="number" step="0.01" placeholder="Ex.: 0.85 ou -1.00" style="width:100%;padding:12px;border-radius:8px;border:1px solid #526078;background:#10151f;color:white;margin-top:6px">
+<button type="button" onclick="registrarResultadoLiquido()">REGISTRAR RESULTADO DA OPERAÇÃO</button>
+<button type="button" onclick="reiniciarTesteGestao()">REINICIAR TESTE DO DIA</button>
+<small>A meta soma somente os lucros positivos das operações vencedoras. As perdas dos gales NÃO são descontadas da meta. O robô simulado para ao acumular US$ 15 em lucros ou após 4 perdas consecutivas. O gale só começa após um novo pré-alerta válido. Este painel ainda não recebe resultados automaticamente da Deriv.</small>
+<div id="gestaoHistorico" aria-live="polite"></div>
+</div>
+
+<div class="card">
+<h3>Histórico de sinais</h3>
+<div id="historico">Nenhuma análise realizada.</div>
+</div>
+
+<script>
+/* CONEXÃO PÚBLICA DERIV — SOMENTE DADOS DE MERCADO, SEM NEGOCIAÇÃO */
+const DERIV_WS_URL = "wss://api.derivws.com/trading/v1/options/ws/public";
+const DERIV_SYMBOL = "1HZ100V";
+const DERIV_AUTO_KEY = "exnova_v18_reconexao_ativa";
+let derivSocket = null;
+let derivReconnectTimer = null;
+let reconexaoAtiva = false;
+let atrasoReconexao = 1500;
+let ultimoM1 = [];
+let ultimoM5 = [];
+let derivReqId = 1;
+let derivLiveCandle = null;
+let ultimaVelaM1Analisada = null;
+
+function construirM5(velas){
+    const grupos = new Map();
+    const ordenadas = [...velas].sort((a,b)=>Date.parse(a.openTime)-Date.parse(b.openTime));
+    ordenadas.forEach(v=>{
+        const horario = Date.parse(v.openTime);
+        if(!Number.isFinite(horario)) return;
+        const inicio = Math.floor(horario/300000)*300000;
+        if(!grupos.has(inicio)) grupos.set(inicio,[]);
+        grupos.get(inicio).push(v);
+    });
+    const resultado = [];
+    [...grupos.keys()].sort((a,b)=>a-b).forEach(inicio=>{
+        const grupo = grupos.get(inicio).sort((a,b)=>Date.parse(a.openTime)-Date.parse(b.openTime));
+        if(grupo.length !== 5) return;
+        const horarios = grupo.map(v=>Date.parse(v.openTime));
+        const consecutivas = horarios.every((h,i)=>i===0 || h-horarios[i-1]===60000);
+        const mesmoIntervalo = horarios.every(h=>Math.floor(h/300000)*300000===inicio);
+        if(!consecutivas || !mesmoIntervalo) return;
+        resultado.push({openTime:new Date(inicio).toISOString(),open:grupo[0].open,
+            high:Math.max(...grupo.map(v=>v.high)),low:Math.min(...grupo.map(v=>v.low)),close:grupo[4].close});
+    });
+    return resultado;
+}
+
+function converterCandleDeriv(c){
+    // open_time é o início fixo da vela. epoch pode mudar a cada tick de 1 segundo.
+    const epoch = Number(c.open_time ?? c.epoch);
+    const open = Number(c.open), high = Number(c.high), low = Number(c.low), close = Number(c.close);
+    if(!Number.isFinite(epoch) || ![open,high,low,close].every(Number.isFinite) || high<low) return null;
+    return {openTime:new Date(epoch*1000).toISOString(),open,high,low,close,volume:0,tickVolume:0};
+}
+
+function atualizarPainelDeriv(){
+    ultimoM1.sort((a,b)=>Date.parse(a.openTime)-Date.parse(b.openTime));
+    const unicas = new Map();
+    ultimoM1.forEach(v=>unicas.set(v.openTime,v));
+    ultimoM1 = [...unicas.values()].slice(-300);
+    ultimoM5 = construirM5(ultimoM1);
+    document.getElementById("m1").value = JSON.stringify(ultimoM1);
+    document.getElementById("m5").value = JSON.stringify(ultimoM5);
+    document.getElementById("ultimaAtualizacao").textContent = "Última atualização: "+new Date().toLocaleTimeString("pt-BR");
+    document.getElementById("testeM1").textContent = "Velas M1 recebidas: "+ultimoM1.length;
+    document.getElementById("testeM5").textContent = "Velas M5 completas: "+ultimoM5.length;
+    if(ultimoM1.length>=22 && ultimoM5.length>=22){
+        document.getElementById("testeStatus").textContent = "COTAÇÕES REAIS DA DERIV RECEBIDAS";
+        document.getElementById("testeStatus").className = "ok";
+        const ultimaFechada = ultimoM1[ultimoM1.length-1].openTime;
+        // A análise e a contagem só avançam quando uma nova vela M1 fecha (60 segundos).
+        if(ultimaFechada !== ultimaVelaM1Analisada){
+            ultimaVelaM1Analisada = ultimaFechada;
+            analisar();
+        }
+    } else {
+        document.getElementById("signal").textContent = "AGUARDANDO HISTÓRICO SUFICIENTE";
+        document.getElementById("details").textContent = "M1: "+ultimoM1.length+"/22 | M5: "+ultimoM5.length+"/22. Aguardando mais velas.";
+    }
+}
+
+function agendarReconexaoDeriv(){
+    if(!reconexaoAtiva || document.hidden || derivReconnectTimer) return;
+    derivReconnectTimer = setTimeout(()=>{
+        derivReconnectTimer = null;
+        if(!reconexaoAtiva) return;
+        if(!navigator.onLine){
+            document.getElementById("apiStatus").textContent = "SEM INTERNET — AGUARDANDO REDE PARA RECONECTAR";
+            agendarReconexaoDeriv();
+            return;
+        }
+        conectarDeriv(true);
+    }, atrasoReconexao);
+    atrasoReconexao = Math.min(atrasoReconexao * 2, 30000);
+}
+
+function conectarDeriv(automatico=false){
+    if(!automatico){
+        reconexaoAtiva = true;
+        try{localStorage.setItem(DERIV_AUTO_KEY, "1");}catch(e){}
+        atrasoReconexao = 1500;
+    }
+    if(derivReconnectTimer){ clearTimeout(derivReconnectTimer); derivReconnectTimer=null; }
+    if(derivSocket){
+        const anterior = derivSocket;
+        derivSocket = null;
+        anterior.onopen = anterior.onmessage = anterior.onerror = anterior.onclose = null;
+        try{ anterior.close(); }catch(e){}
+    }
+    document.getElementById("apiStatus").textContent = automatico ? "RECONECTANDO À DERIV..." : "CONECTANDO À DERIV...";
+    document.getElementById("apiStatus").className = "";
+    try{
+        derivSocket = new WebSocket(DERIV_WS_URL);
+        const socketAtual = derivSocket;
+        derivSocket.onopen = ()=>{
+            if(socketAtual !== derivSocket) return;
+            atrasoReconexao = 1500;
+            document.getElementById("apiStatus").textContent = "CONECTADA — SOLICITANDO VELAS M1";
+            document.getElementById("apiStatus").className = "ok";
+            derivSocket.send(JSON.stringify({ticks_history:DERIV_SYMBOL,count:300,end:"latest",style:"candles",granularity:60,subscribe:1,req_id:derivReqId++}));
+        };
+        derivSocket.onmessage = (evento)=>{
+            if(socketAtual !== derivSocket) return;
+            let dados;
+            try{ dados=JSON.parse(evento.data); }catch(e){ return; }
+            if(dados.error){
+                document.getElementById("apiStatus").textContent = "ERRO DERIV: "+dados.error.message;
+                document.getElementById("apiStatus").className = "erro";
+                return;
+            }
+            // A resposta padrão de ticks_history da Deriv chega como msg_type "candles"
+            // e traz o array em dados.candles. Mantemos compatibilidade com o formato history.
+            const historicoRecebido = Array.isArray(dados.candles)
+                ? dados.candles
+                : (dados.history && Array.isArray(dados.history.candles) ? dados.history.candles : null);
+            if((dados.msg_type === "candles" || dados.msg_type === "history" || historicoRecebido) && historicoRecebido){
+                ultimoM1 = historicoRecebido.map(converterCandleDeriv).filter(v=>v && Date.parse(v.openTime)+60000<=Date.now());
+                derivLiveCandle = null;
+                ultimaVelaM1Analisada = null;
+                atualizarPainelDeriv();
+                document.getElementById("apiStatus").textContent = "DERIV CONECTADA — HISTÓRICO RECEBIDO ("+ultimoM1.length+" VELAS M1)";
+                document.getElementById("apiStatus").className = "ok";
+            }
+            if(dados.msg_type === "ohlc" && dados.ohlc){
+                const candle = converterCandleDeriv(dados.ohlc);
+                if(candle){
+                    // A vela que acabou de ser substituída por uma nova é considerada fechada.
+                    if(derivLiveCandle && Date.parse(candle.openTime)>Date.parse(derivLiveCandle.openTime)){
+                        const idx=ultimoM1.findIndex(v=>v.openTime===derivLiveCandle.openTime);
+                        if(idx>=0) ultimoM1[idx]=derivLiveCandle; else ultimoM1.push(derivLiveCandle);
+                    }
+                    derivLiveCandle=candle;
+                    atualizarPainelDeriv();
+                    document.getElementById("apiStatus").textContent = "DERIV CONECTADA — COTAÇÕES AO VIVO";
+                    document.getElementById("apiStatus").className = "ok";
+                }
+            }
+        };
+        derivSocket.onerror = ()=>{
+            if(socketAtual !== derivSocket) return;
+            document.getElementById("apiStatus").textContent = "ERRO NA CONEXÃO — TENTANDO RECONECTAR";
+            document.getElementById("apiStatus").className = "erro";
+            try{ socketAtual.close(); }catch(e){}
+        };
+        derivSocket.onclose = ()=>{
+            if(socketAtual !== derivSocket) return;
+            derivSocket = null;
+            if(!reconexaoAtiva) return;
+            document.getElementById("apiStatus").textContent = "CONEXÃO ENCERRADA — RECONECTANDO AUTOMATICAMENTE";
+            agendarReconexaoDeriv();
+        };
+    }catch(erro){
+        document.getElementById("apiStatus").textContent = "ERRO: "+erro.message;
+        document.getElementById("apiStatus").className = "erro";
+        agendarReconexaoDeriv();
+    }
+}
+
+function desconectarDeriv(){
+    reconexaoAtiva = false;
+    try{localStorage.removeItem(DERIV_AUTO_KEY);}catch(e){}
+    atrasoReconexao = 1500;
+    if(derivReconnectTimer){clearTimeout(derivReconnectTimer);derivReconnectTimer=null;}
+    if(derivSocket){
+        const anterior = derivSocket;
+        derivSocket = null;
+        anterior.onopen = anterior.onmessage = anterior.onerror = anterior.onclose = null;
+        try{anterior.close();}catch(e){}
+    }
+    const el=document.getElementById("apiStatus");
+    if(el) el.textContent="CONEXÃO PARADA";
+}
+
+// O Chrome pode suspender a página e derrubar o WebSocket em segundo plano.
+// Ao voltar para a aba, força uma conexão nova e recupera o histórico M1 mais recente.
+function reconectarAoRetornar(){
+    if(!reconexaoAtiva || document.hidden) return;
+    if(!navigator.onLine){
+        document.getElementById("apiStatus").textContent = "SEM INTERNET — AGUARDANDO REDE";
+        return;
+    }
+    conectarDeriv(true);
+}
+document.addEventListener("visibilitychange", ()=>{
+    if(!document.hidden) reconectarAoRetornar();
+});
+window.addEventListener("pageshow", reconectarAoRetornar);
+window.addEventListener("online", reconectarAoRetornar);
+
+/* INDICADORES */
+function emaSeries(valores,periodo){
+    const resultado = [];
+    const k = 2/(periodo+1);
+    let anterior = valores[0];
+    for(let i=0;i<valores.length;i++){
+        if(i===0) anterior = valores[i];
+        else anterior = valores[i]*k + anterior*(1-k);
+        resultado.push(anterior);
+    }
+    return resultado;
+}
+
+function rsiSeries(valores,periodo=14){
+    const resultado = Array(valores.length).fill(null);
+    if(valores.length<=periodo) return resultado;
+    let ganhos=0, perdas=0;
+    for(let i=1;i<=periodo;i++){
+        const dif=valores[i]-valores[i-1];
+        if(dif>0) ganhos+=dif;
+        else perdas-=dif;
+    }
+    let ganhoMedio=ganhos/periodo;
+    let perdaMedia=perdas/periodo;
+    function calcularRSI(){
+        if(perdaMedia===0) return ganhoMedio===0 ? 50 : 100;
+        const rs=ganhoMedio/perdaMedia;
+        return 100-(100/(1+rs));
+    }
+    resultado[periodo]=calcularRSI();
+    for(let i=periodo+1;i<valores.length;i++){
+        const dif=valores[i]-valores[i-1];
+        ganhoMedio=(ganhoMedio*(periodo-1)+Math.max(dif,0))/periodo;
+        perdaMedia=(perdaMedia*(periodo-1)+Math.max(-dif,0))/periodo;
+        resultado[i]=calcularRSI();
+    }
+    return resultado;
+}
+
+function validarVelas(velas){
+    if(!Array.isArray(velas) || velas.length<22) return false;
+    return velas.every(v=>v && ["open","high","low","close"].every(k=>Number.isFinite(Number(v[k]))));
+}
+
+/* TESTE SIMULADO */
+function gerarVelas(preco,quantidade,variacao){
+    const velas=[];
+    for(let i=0;i<quantidade;i++){
+        const abertura=preco;
+        const fechamento=abertura+variacao;
+        velas.push({
+            open:Number(abertura.toFixed(6)),
+            high:Number((Math.max(abertura,fechamento)+0.00010).toFixed(6)),
+            low:Number((Math.min(abertura,fechamento)-0.00010).toFixed(6)),
+            close:Number(fechamento.toFixed(6))
+        });
+        preco=fechamento;
+    }
+    return velas;
+}
+
+function carregarTeste(){
+    try{
+        desconectarDeriv();
+        const base=Date.now()-3600000;
+        const m1=gerarVelas(1.100000,300,0.000002).map((v,i)=>({
+            ...v,openTime:new Date(base+i*60000).toISOString()
+        }));
+        const m5=construirM5(m1);
+        document.getElementById("m1").value=JSON.stringify(m1);
+        document.getElementById("m5").value=JSON.stringify(m5);
+        document.getElementById("testeStatus").textContent="TESTE SIMULADO — NÃO SÃO DADOS REAIS";
+        document.getElementById("testeStatus").className="ok";
+        document.getElementById("testeM1").textContent="Velas M1: "+m1.length;
+        document.getElementById("testeM5").textContent="Velas M5: "+m5.length;
+        document.getElementById("status").textContent="DADOS DE TESTE CARREGADOS";
+        analisar();
+    }catch(erro){
+        document.getElementById("testeStatus").textContent="ERRO: "+erro.message;
+    }
+}
+
+/*
+REPRODUÇÃO DAS REGRAS ENVIADAS:
+- Para cada vela M1, usa somente a última M5 que já estaria fechada
+  no horário de fechamento daquela M1.
+- Não aplica a tendência M5 mais recente retroativamente a todo o histórico.
+- Contadores originais: 3 velas; módulo estratégico separado: 5 velas.
+*/
+function analisar(){
+    try{
+        const m1=JSON.parse(document.getElementById("m1").value);
+        const m5=JSON.parse(document.getElementById("m5").value);
+        if(!validarVelas(m1)||!validarVelas(m5)){
+            throw new Error("Insira pelo menos 22 velas válidas em M1 e M5.");
+        }
+
+        m1.sort((a,b)=>Date.parse(a.openTime||0)-Date.parse(b.openTime||0));
+        m5.sort((a,b)=>Date.parse(a.openTime||0)-Date.parse(b.openTime||0));
+
+        const fechamentos=m1.map(v=>Number(v.close));
+        const fechamentos5=m5.map(v=>Number(v.close));
+        const e9=emaSeries(fechamentos,9);
+        const e21=emaSeries(fechamentos,21);
+        const rsi=rsiSeries(fechamentos,14);
+        const e9m5=emaSeries(fechamentos5,9);
+        const e21m5=emaSeries(fechamentos5,21);
+        const temposM5=m5.map(v=>Date.parse(v.openTime));
+
+        function contextoM5(tempoFechamentoM1){
+            let idx=-1;
+            for(let j=0;j<temposM5.length;j++){
+                if(temposM5[j]+300000<=tempoFechamentoM1) idx=j;
+                else break;
+            }
+            if(idx<3) return {valido:false,tendenciaCall:false,tendenciaPut:false,lateral:false,idx};
+            const idade=tempoFechamentoM1-(temposM5[idx]+300000);
+            if(idade>300000) return {valido:false,tendenciaCall:false,tendenciaPut:false,lateral:false,idx};
+            const fechamento5=fechamentos5[idx];
+            const tendenciaCall=fechamento5>e21m5[idx] && e21m5[idx]>e21m5[idx-1];
+            const tendenciaPut=fechamento5<e21m5[idx] && e21m5[idx]<e21m5[idx-1];
+            const distanciaMedias=Math.abs(e9m5[idx]-e21m5[idx]);
+            const inclinacaoEma=Math.abs(e21m5[idx]-e21m5[idx-2]);
+            const lateral=distanciaMedias<fechamento5*0.00035 &&
+                          inclinacaoEma<fechamento5*0.00025;
+            return {valido:true,tendenciaCall,tendenciaPut,lateral,idx};
+        }
+
+        let callRestante=0,putRestante=0,novoCallRestante=0,novoPutRestante=0;
+        const sinais=[];
+        let contextoAtual=null;
+
+        for(let i=0;i<m1.length;i++){
+            if(rsi[i]===null) continue;
+            const tempoM1=Date.parse(m1[i].openTime);
+            const contexto=Number.isFinite(tempoM1)
+                ? contextoM5(tempoM1+60000)
+                : {valido:false,tendenciaCall:false,tendenciaPut:false,lateral:false};
+            contextoAtual=contexto;
+
+            const abertura=Number(m1[i].open);
+            const fechamento=Number(m1[i].close);
+            const tendenciaCall=contexto.valido && contexto.tendenciaCall;
+            const tendenciaPut=contexto.valido && contexto.tendenciaPut;
+            const mercadoLateral=contexto.valido && contexto.lateral;
+
+            const callForte=tendenciaCall && fechamento>abertura &&
+                fechamento>e9[i] && e9[i]>e21[i] && rsi[i]>52;
+            const putForte=tendenciaPut && fechamento<abertura &&
+                fechamento<e9[i] && e9[i]<e21[i] && rsi[i]<48;
+
+            const preCallBruto=tendenciaCall && e9[i]>e21[i] &&
+                rsi[i]>=45 && rsi[i]<=52 && !callForte;
+            const prePutBruto=tendenciaPut && e9[i]<e21[i] &&
+                rsi[i]>=48 && rsi[i]<=55 && !putForte;
+
+            const preCall=preCallBruto && callRestante<=0;
+            const prePut=prePutBruto && putRestante<=0;
+            if(preCall) callRestante=3;
+            else if(callRestante>0) callRestante--;
+            if(prePut) putRestante=3;
+            else if(putRestante>0) putRestante--;
+
+            const novoPrePutBruto=tendenciaPut && !mercadoLateral &&
+                e9[i]<e21[i] && fechamento<e21[i] &&
+                fechamento>abertura && rsi[i]>40 && rsi[i]<55 && !putForte;
+            const novoPreCallBruto=tendenciaCall && !mercadoLateral &&
+                e9[i]>e21[i] && fechamento>e21[i] &&
+                fechamento<abertura && rsi[i]>45 && rsi[i]<60 && !callForte;
+
+            const novoPreCall=novoPreCallBruto && novoCallRestante<=0;
+            const novoPrePut=novoPrePutBruto && novoPutRestante<=0;
+            if(novoPreCall) novoCallRestante=5;
+            else if(novoCallRestante>0) novoCallRestante--;
+            if(novoPrePut) novoPutRestante=5;
+            else if(novoPutRestante>0) novoPutRestante--;
+
+            if(callForte) sinais.push({tipo:"CALL CONFIRMADO",classe:"verde",vela:i+1});
+            if(putForte) sinais.push({tipo:"PUT CONFIRMADO",classe:"vermelho",vela:i+1});
+            if(preCall) sinais.push({tipo:"PRÉ-CALL ORIGINAL",classe:"azul",vela:i+1});
+            if(prePut) sinais.push({tipo:"PRÉ-PUT ORIGINAL",classe:"roxo",vela:i+1});
+            if(novoPreCall) sinais.push({tipo:"PRÉ-CALL ESTRATÉGICO",classe:"verde",vela:i+1});
+            if(novoPrePut) sinais.push({tipo:"PRÉ-PUT ESTRATÉGICO",classe:"vermelho",vela:i+1});
+        }
+
+        const ultimo=m1.length-1;
+        document.getElementById("ema9").textContent=e9[ultimo].toFixed(6);
+        document.getElementById("ema21").textContent=e21[ultimo].toFixed(6);
+        document.getElementById("rsi").textContent=rsi[ultimo]===null?"--":rsi[ultimo].toFixed(2);
+
+        const contextoFinal=Number.isFinite(Date.parse(m1[ultimo].openTime))
+            ? contextoM5(Date.parse(m1[ultimo].openTime)+60000)
+            : contextoAtual;
+
+        document.getElementById("trend").textContent=
+            contextoFinal && contextoFinal.valido
+                ? contextoFinal.tendenciaCall?"TENDÊNCIA DE ALTA":
+                  contextoFinal.tendenciaPut?"TENDÊNCIA DE BAIXA":"M5 SEM DIREÇÃO"
+                : "M5 SEM CONTEXTO VÁLIDO";
+        document.getElementById("lateral").textContent=
+            "Mercado lateral: "+
+            (contextoFinal && contextoFinal.valido
+                ? contextoFinal.lateral?"SIM":"NÃO"
+                : "SEM DADOS SUFICIENTES");
+
+        const sinaisAtuais=sinais.filter(s=>s.vela===m1.length);
+        const central=document.getElementById("signal");
+        const detalhes=document.getElementById("details");
+        if(sinaisAtuais.length){
+            central.textContent="SINAL IDENTIFICADO";
+            central.className="ok";
+            detalhes.innerHTML=sinaisAtuais.map(s=>
+                '<div class="item '+s.classe+'"><b>'+s.tipo+'</b></div>'
+            ).join("");
+        }else{
+            central.textContent="AGUARDANDO SINAL";
+            central.className="";
+            detalhes.textContent="Nenhum sinal identificado na última vela M1.";
+        }
+
+        const historico=document.getElementById("historico");
+        if(sinais.length){
+            historico.innerHTML=sinais.slice(-20).reverse().map(s=>
+                '<div class="item '+s.classe+'"><b>'+s.tipo+'</b> - Vela M1 '+s.vela+'</div>'
+            ).join("");
+        }else{
+            historico.textContent="Nenhum sinal encontrado nas velas analisadas.";
+        }
+        document.getElementById("status").textContent="ANÁLISE CONCLUÍDA";
+    }catch(erro){
+        document.getElementById("signal").textContent="ERRO NA ANÁLISE";
+        document.getElementById("details").textContent=erro.message;
+        document.getElementById("status").textContent="VERIFICAR DADOS";
+    }
+}
+
+/* GERENCIAMENTO DIÁRIO — SIMULADOR, SEM ENVIO DE ORDENS */
+const GESTAO_CONFIG = {
+    valores: [1, 2, 6, 18],
+    metaDiaria: 15,
+    maxPerdas: 4
+};
+const GESTAO_STORAGE_KEY = "exnova_v18_gestao_diaria_teste";
+function dataLocalChave(){
+    const d = new Date();
+    return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+}
+function estadoInicialGestao(){
+    return {
+        data: dataLocalChave(), operacoesHoje: 0, lucroLiquidoHoje: 0,
+        perdasConsecutivas: 0, etapa: 0, aguardandoNovoSinal: true,
+        operacaoAberta: false, valorAtual: 1, totalSequencia: 0,
+        bloqueado: false, motivoBloqueio: "", historico: []
+    };
+}
+function carregarGestao(){
+    try{
+        const salvo = JSON.parse(localStorage.getItem(GESTAO_STORAGE_KEY) || "null");
+        if(salvo && salvo.data === dataLocalChave()) return {...estadoInicialGestao(), ...salvo};
+    }catch(e){}
+    return estadoInicialGestao();
+}
+let gestao = carregarGestao();
+function salvarGestao(){
+    try{localStorage.setItem(GESTAO_STORAGE_KEY, JSON.stringify(gestao));}catch(e){}
+}
+function verificarNovoDia(){
+    if(gestao.data !== dataLocalChave()){
+        gestao = estadoInicialGestao();
+        salvarGestao();
+    }
+}
+function dinheiro(valor){
+    return "US$ " + Number(valor).toFixed(2);
+}
+function bloquearGestao(motivo){
+    gestao.bloqueado = true;
+    gestao.motivoBloqueio = motivo;
+    gestao.historico.push("ROBÔ PARADO NO DIA: " + motivo);
+}
+function atualizarGestao(){
+    verificarNovoDia();
+    const status = document.getElementById("gestaoStatus");
+    const etapa = document.getElementById("gestaoEtapa");
+    const contagem = document.getElementById("gestaoContagem");
+    const total = document.getElementById("gestaoTotal");
+    const historico = document.getElementById("gestaoHistorico");
+    if(!status) return;
+    if(gestao.bloqueado){
+        status.textContent = "ROBÔ PARADO ATÉ O PRÓXIMO DIA: " + gestao.motivoBloqueio;
+        status.className = "erro";
+    }else if(gestao.operacaoAberta){
+        status.textContent = "OPERAÇÃO DE TESTE ABERTA — informe o resultado líquido.";
+        status.className = "azul";
+    }else if(gestao.aguardandoNovoSinal && gestao.perdasConsecutivas > 0){
+        status.textContent = "Aguardando um NOVO pré-alerta válido para o próximo gale.";
+        status.className = "roxo";
+    }else{
+        status.textContent = "Aguardando o primeiro pré-alerta válido.";
+        status.className = "ok";
+    }
+    const nomeEtapa = gestao.etapa === 0 ? "inicial" : gestao.etapa + "º gale";
+    etapa.textContent = gestao.bloqueado ? "Entradas suspensas" :
+        "Próxima entrada: " + dinheiro(GESTAO_CONFIG.valores[gestao.etapa]) + " (" + nomeEtapa + ")";
+    contagem.textContent = "Operações hoje: " + gestao.operacoesHoje + " | Perdas consecutivas: " +
+        gestao.perdasConsecutivas + "/" + GESTAO_CONFIG.maxPerdas;
+    total.textContent = "Lucro acumulado nas vitórias: " + dinheiro(gestao.lucroLiquidoHoje) +
+        " / Meta: " + dinheiro(GESTAO_CONFIG.metaDiaria) +
+        " | Perda na sequência atual: " + dinheiro(gestao.totalSequencia);
+    historico.innerHTML = gestao.historico.slice(-12).reverse().map(item =>
+        '<div class="item">' + item + '</div>'
+    ).join("") || "Nenhuma operação de teste registrada.";
+    const botaoSinal = document.querySelector('#gestaoOperacoes button[onclick="testeNovoPreAlerta()"]');
+    const campoResultado = document.getElementById("resultadoLiquido");
+    const botaoResultado = document.querySelector('#gestaoOperacoes button[onclick="registrarResultadoLiquido()"]');
+    if(botaoSinal) botaoSinal.disabled = gestao.bloqueado || gestao.operacaoAberta;
+    if(campoResultado) campoResultado.disabled = !gestao.operacaoAberta || gestao.bloqueado;
+    if(botaoResultado) botaoResultado.disabled = !gestao.operacaoAberta || gestao.bloqueado;
+    salvarGestao();
+}
+function testeNovoPreAlerta(){
+    verificarNovoDia();
+    if(gestao.bloqueado || gestao.operacaoAberta || !gestao.aguardandoNovoSinal) return;
+    if(gestao.lucroLiquidoHoje >= GESTAO_CONFIG.metaDiaria){
+        bloquearGestao("meta de US$ 15 em lucros acumulados nas vitórias atingida.");
+        atualizarGestao(); return;
+    }
+    gestao.valorAtual = GESTAO_CONFIG.valores[gestao.etapa];
+    gestao.operacoesHoje++;
+    gestao.operacaoAberta = true;
+    gestao.aguardandoNovoSinal = false;
+    gestao.historico.push("Operação " + gestao.operacoesHoje + ": " + dinheiro(gestao.valorAtual) +
+        " — " + (gestao.etapa === 0 ? "entrada inicial" : gestao.etapa + "º gale") +
+        " — aberta após novo pré-alerta");
+    atualizarGestao();
+}
+function registrarResultadoLiquido(){
+    verificarNovoDia();
+    if(!gestao.operacaoAberta || gestao.bloqueado) return;
+    const campo = document.getElementById("resultadoLiquido");
+    const resultado = Number(campo.value);
+    if(campo.value.trim() === "" || !Number.isFinite(resultado)){
+        alert("Informe o resultado líquido da operação em dólares. Ex.: 0.85 ou -1.00");
+        return;
+    }
+    gestao.operacaoAberta = false;
+    if(resultado > 0){
+        gestao.lucroLiquidoHoje = Number((gestao.lucroLiquidoHoje + resultado).toFixed(2));
+        gestao.historico.push("VITÓRIA: resultado líquido " + dinheiro(resultado) +
+            ". Sequência encerrada; próxima entrada volta a US$ 1.");
+        gestao.perdasConsecutivas = 0;
+        gestao.etapa = 0;
+        gestao.totalSequencia = 0;
+        gestao.aguardandoNovoSinal = true;
+    }else if(resultado < 0){
+        gestao.perdasConsecutivas++;
+        gestao.totalSequencia = Number((gestao.totalSequencia + Math.abs(resultado)).toFixed(2));
+        gestao.historico.push("LOSS: resultado líquido " + dinheiro(resultado) +
+            ". Aguardando novo pré-alerta para continuar a sequência.");
+        if(gestao.perdasConsecutivas >= GESTAO_CONFIG.maxPerdas){
+            bloquearGestao("4 perdas consecutivas (entrada inicial + 3 gales).");
+        }else{
+            gestao.etapa = gestao.perdasConsecutivas;
+            gestao.aguardandoNovoSinal = true;
+        }
+    }else{
+        gestao.historico.push("RESULTADO ZERO: sem lucro ou prejuízo. Próxima tentativa mantém o mesmo valor.");
+        gestao.aguardandoNovoSinal = true;
+    }
+    campo.value = "";
+    if(gestao.lucroLiquidoHoje >= GESTAO_CONFIG.metaDiaria){
+        bloquearGestao("meta de US$ 15 em lucros acumulados nas vitórias atingida.");
+    }
+    atualizarGestao();
+}
+function reiniciarTesteGestao(){
+    if(!confirm("Reiniciar os dados de teste deste dia? Isso apagará o histórico e o resultado acumulado mostrado neste navegador.")) return;
+    gestao = estadoInicialGestao();
+    salvarGestao();
+    const campo = document.getElementById("resultadoLiquido");
+    if(campo) campo.value = "";
+    atualizarGestao();
+}
+
+
+atualizarGestao();
+
+// Se o usuário já havia conectado antes, tenta retomar ao reabrir/recarregar o site.
+try{
+    if(localStorage.getItem(DERIV_AUTO_KEY) === "1"){
+        reconexaoAtiva = true;
+        conectarDeriv(true);
+    }
+}catch(e){}
+
+</script>
+</body>
+</html>
