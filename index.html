@@ -53,6 +53,18 @@ small{color:#aab6c5}
 <small>Fonte: transmissão pública de cotações da Deriv. Esta etapa não usa token e não envia ordens.</small>
 </div>
 
+
+<div class="card" id="backendDeriv">
+<h3>Conexão segura — servidor Deriv DEMO</h3>
+<p id="backendStatus" class="erro">BACKEND NÃO TESTADO</p>
+<label for="serverAccessKey">Chave SERVER_ACCESS_KEY do Render</label>
+<input id="serverAccessKey" type="password" autocomplete="off" placeholder="Cole aqui a chave do servidor" style="width:100%;padding:12px;border-radius:8px;border:1px solid #526078;background:#10151f;color:white;margin-top:6px">
+<button type="button" onclick="testarBackend()">TESTAR SERVIDOR</button>
+<button type="button" onclick="validarContaDemo()">VALIDAR CONTA DEMO + WEBSOCKET</button>
+<p id="backendConta">Conta DEMO: ainda não verificada.</p>
+<small>A chave fica somente na memória desta página enquanto ela estiver aberta. Não a coloque no código HTML nem envie por mensagem. Esta etapa apenas testa o servidor e a conexão DEMO; ainda não envia operações.</small>
+</div>
+
 <div class="card">
 <h3>Teste de dados simulados</h3>
 <p id="testeStatus">Aguardando teste...</p>
@@ -319,6 +331,84 @@ document.addEventListener("visibilitychange", ()=>{
 window.addEventListener("pageshow", reconectarAoRetornar);
 window.addEventListener("online", reconectarAoRetornar);
 
+
+/* CONEXÃO COM BACKEND — TESTES SEM ENVIO DE ORDENS */
+const EXNOVA_BACKEND_URL = "https://exnova-robo-v18-backend.onrender.com";
+let exnovaServerKey = "";
+
+function atualizarBackendStatus(texto, erro=false){
+    const el = document.getElementById("backendStatus");
+    if(!el) return;
+    el.textContent = texto;
+    el.className = erro ? "erro" : "ok";
+}
+
+async function backendFetch(path, options={}){
+    const headers = {
+        "Content-Type": "application/json",
+        ...(exnovaServerKey ? {"x-server-key": exnovaServerKey} : {}),
+        ...(options.headers || {})
+    };
+    const response = await fetch(EXNOVA_BACKEND_URL + path, {
+        ...options,
+        headers,
+        cache: "no-store"
+    });
+    let data = {};
+    try { data = await response.json(); } catch(e) {}
+    if(!response.ok) throw new Error(data.error || ("HTTP " + response.status));
+    return data;
+}
+
+async function testarBackend(){
+    atualizarBackendStatus("TESTANDO SERVIDOR...");
+    try{
+        const response = await fetch(EXNOVA_BACKEND_URL + "/health", {cache:"no-store"});
+        if(!response.ok) throw new Error("Servidor respondeu HTTP " + response.status);
+        const data = await response.json();
+        if(data.status !== "online" || data.mode !== "DEMO" || data.trading !== "demo-only"){
+            throw new Error("Resposta inesperada do servidor. Confira o deploy.");
+        }
+        atualizarBackendStatus("SERVIDOR ONLINE — MODO DEMO CONFIRMADO");
+    }catch(erro){
+        atualizarBackendStatus("FALHA NO SERVIDOR: " + erro.message, true);
+    }
+}
+
+async function validarContaDemo(){
+    const campo = document.getElementById("serverAccessKey");
+    const chave = campo ? campo.value.trim() : "";
+    if(!chave){
+        atualizarBackendStatus("INFORME A CHAVE DO SERVIDOR PARA VALIDAR A CONTA.", true);
+        return;
+    }
+    exnovaServerKey = chave;
+    atualizarBackendStatus("VALIDANDO CONTA DEMO...");
+    document.getElementById("backendConta").textContent = "Consultando conta DEMO e WebSocket...";
+    try{
+        const conta = await backendFetch("/api/deriv/accounts", {
+            method:"POST", body:JSON.stringify({})
+        });
+        if(!conta.ok || !conta.account || String(conta.account.accountType).toLowerCase() !== "demo"){
+            throw new Error("O servidor não confirmou uma conta DEMO.");
+        }
+        const ws = await backendFetch("/api/deriv/otp", {
+            method:"POST", body:JSON.stringify({})
+        });
+        if(!ws.ok || ws.mode !== "DEMO" || ws.websocketReady !== true){
+            throw new Error("WebSocket DEMO não foi confirmado.");
+        }
+        document.getElementById("backendConta").textContent =
+            "Conta DEMO validada — moeda: " + (conta.account.currency || "USD") +
+            " | WebSocket DEMO: conectado com sucesso.";
+        atualizarBackendStatus("BACKEND + CONTA DEMO + WEBSOCKET OK");
+    }catch(erro){
+        document.getElementById("backendConta").textContent = "Validação não concluída.";
+        atualizarBackendStatus("ERRO NA VALIDAÇÃO: " + erro.message, true);
+    }
+}
+
+
 /* INDICADORES */
 function emaSeries(valores,periodo){
     const resultado = [];
@@ -359,361 +449,4 @@ function rsiSeries(valores,periodo=14){
 }
 
 function validarVelas(velas){
-    if(!Array.isArray(velas) || velas.length<22) return false;
-    return velas.every(v=>v && ["open","high","low","close"].every(k=>Number.isFinite(Number(v[k]))));
-}
-
-/* TESTE SIMULADO */
-function gerarVelas(preco,quantidade,variacao){
-    const velas=[];
-    for(let i=0;i<quantidade;i++){
-        const abertura=preco;
-        const fechamento=abertura+variacao;
-        velas.push({
-            open:Number(abertura.toFixed(6)),
-            high:Number((Math.max(abertura,fechamento)+0.00010).toFixed(6)),
-            low:Number((Math.min(abertura,fechamento)-0.00010).toFixed(6)),
-            close:Number(fechamento.toFixed(6))
-        });
-        preco=fechamento;
-    }
-    return velas;
-}
-
-function carregarTeste(){
-    try{
-        desconectarDeriv();
-        const base=Date.now()-3600000;
-        const m1=gerarVelas(1.100000,300,0.000002).map((v,i)=>({
-            ...v,openTime:new Date(base+i*60000).toISOString()
-        }));
-        const m5=construirM5(m1);
-        document.getElementById("m1").value=JSON.stringify(m1);
-        document.getElementById("m5").value=JSON.stringify(m5);
-        document.getElementById("testeStatus").textContent="TESTE SIMULADO — NÃO SÃO DADOS REAIS";
-        document.getElementById("testeStatus").className="ok";
-        document.getElementById("testeM1").textContent="Velas M1: "+m1.length;
-        document.getElementById("testeM5").textContent="Velas M5: "+m5.length;
-        document.getElementById("status").textContent="DADOS DE TESTE CARREGADOS";
-        analisar();
-    }catch(erro){
-        document.getElementById("testeStatus").textContent="ERRO: "+erro.message;
-    }
-}
-
-/*
-REPRODUÇÃO DAS REGRAS ENVIADAS:
-- Para cada vela M1, usa somente a última M5 que já estaria fechada
-  no horário de fechamento daquela M1.
-- Não aplica a tendência M5 mais recente retroativamente a todo o histórico.
-- Contadores originais: 3 velas; módulo estratégico separado: 5 velas.
-*/
-function analisar(){
-    try{
-        const m1=JSON.parse(document.getElementById("m1").value);
-        const m5=JSON.parse(document.getElementById("m5").value);
-        if(!validarVelas(m1)||!validarVelas(m5)){
-            throw new Error("Insira pelo menos 22 velas válidas em M1 e M5.");
-        }
-
-        m1.sort((a,b)=>Date.parse(a.openTime||0)-Date.parse(b.openTime||0));
-        m5.sort((a,b)=>Date.parse(a.openTime||0)-Date.parse(b.openTime||0));
-
-        const fechamentos=m1.map(v=>Number(v.close));
-        const fechamentos5=m5.map(v=>Number(v.close));
-        const e9=emaSeries(fechamentos,9);
-        const e21=emaSeries(fechamentos,21);
-        const rsi=rsiSeries(fechamentos,14);
-        const e9m5=emaSeries(fechamentos5,9);
-        const e21m5=emaSeries(fechamentos5,21);
-        const temposM5=m5.map(v=>Date.parse(v.openTime));
-
-        function contextoM5(tempoFechamentoM1){
-            let idx=-1;
-            for(let j=0;j<temposM5.length;j++){
-                if(temposM5[j]+300000<=tempoFechamentoM1) idx=j;
-                else break;
-            }
-            if(idx<3) return {valido:false,tendenciaCall:false,tendenciaPut:false,lateral:false,idx};
-            const idade=tempoFechamentoM1-(temposM5[idx]+300000);
-            if(idade>300000) return {valido:false,tendenciaCall:false,tendenciaPut:false,lateral:false,idx};
-            const fechamento5=fechamentos5[idx];
-            const tendenciaCall=fechamento5>e21m5[idx] && e21m5[idx]>e21m5[idx-1];
-            const tendenciaPut=fechamento5<e21m5[idx] && e21m5[idx]<e21m5[idx-1];
-            const distanciaMedias=Math.abs(e9m5[idx]-e21m5[idx]);
-            const inclinacaoEma=Math.abs(e21m5[idx]-e21m5[idx-2]);
-            const lateral=distanciaMedias<fechamento5*0.00035 &&
-                          inclinacaoEma<fechamento5*0.00025;
-            return {valido:true,tendenciaCall,tendenciaPut,lateral,idx};
-        }
-
-        let callRestante=0,putRestante=0,novoCallRestante=0,novoPutRestante=0;
-        const sinais=[];
-        let contextoAtual=null;
-
-        for(let i=0;i<m1.length;i++){
-            if(rsi[i]===null) continue;
-            const tempoM1=Date.parse(m1[i].openTime);
-            const contexto=Number.isFinite(tempoM1)
-                ? contextoM5(tempoM1+60000)
-                : {valido:false,tendenciaCall:false,tendenciaPut:false,lateral:false};
-            contextoAtual=contexto;
-
-            const abertura=Number(m1[i].open);
-            const fechamento=Number(m1[i].close);
-            const tendenciaCall=contexto.valido && contexto.tendenciaCall;
-            const tendenciaPut=contexto.valido && contexto.tendenciaPut;
-            const mercadoLateral=contexto.valido && contexto.lateral;
-
-            const callForte=tendenciaCall && fechamento>abertura &&
-                fechamento>e9[i] && e9[i]>e21[i] && rsi[i]>52;
-            const putForte=tendenciaPut && fechamento<abertura &&
-                fechamento<e9[i] && e9[i]<e21[i] && rsi[i]<48;
-
-            const preCallBruto=tendenciaCall && e9[i]>e21[i] &&
-                rsi[i]>=45 && rsi[i]<=52 && !callForte;
-            const prePutBruto=tendenciaPut && e9[i]<e21[i] &&
-                rsi[i]>=48 && rsi[i]<=55 && !putForte;
-
-            const preCall=preCallBruto && callRestante<=0;
-            const prePut=prePutBruto && putRestante<=0;
-            if(preCall) callRestante=3;
-            else if(callRestante>0) callRestante--;
-            if(prePut) putRestante=3;
-            else if(putRestante>0) putRestante--;
-
-            const novoPrePutBruto=tendenciaPut && !mercadoLateral &&
-                e9[i]<e21[i] && fechamento<e21[i] &&
-                fechamento>abertura && rsi[i]>40 && rsi[i]<55 && !putForte;
-            const novoPreCallBruto=tendenciaCall && !mercadoLateral &&
-                e9[i]>e21[i] && fechamento>e21[i] &&
-                fechamento<abertura && rsi[i]>45 && rsi[i]<60 && !callForte;
-
-            const novoPreCall=novoPreCallBruto && novoCallRestante<=0;
-            const novoPrePut=novoPrePutBruto && novoPutRestante<=0;
-            if(novoPreCall) novoCallRestante=5;
-            else if(novoCallRestante>0) novoCallRestante--;
-            if(novoPrePut) novoPutRestante=5;
-            else if(novoPutRestante>0) novoPutRestante--;
-
-            if(callForte) sinais.push({tipo:"CALL CONFIRMADO",classe:"verde",vela:i+1});
-            if(putForte) sinais.push({tipo:"PUT CONFIRMADO",classe:"vermelho",vela:i+1});
-            if(preCall) sinais.push({tipo:"PRÉ-CALL ORIGINAL",classe:"azul",vela:i+1});
-            if(prePut) sinais.push({tipo:"PRÉ-PUT ORIGINAL",classe:"roxo",vela:i+1});
-            if(novoPreCall) sinais.push({tipo:"PRÉ-CALL ESTRATÉGICO",classe:"verde",vela:i+1});
-            if(novoPrePut) sinais.push({tipo:"PRÉ-PUT ESTRATÉGICO",classe:"vermelho",vela:i+1});
-        }
-
-        const ultimo=m1.length-1;
-        document.getElementById("ema9").textContent=e9[ultimo].toFixed(6);
-        document.getElementById("ema21").textContent=e21[ultimo].toFixed(6);
-        document.getElementById("rsi").textContent=rsi[ultimo]===null?"--":rsi[ultimo].toFixed(2);
-
-        const contextoFinal=Number.isFinite(Date.parse(m1[ultimo].openTime))
-            ? contextoM5(Date.parse(m1[ultimo].openTime)+60000)
-            : contextoAtual;
-
-        document.getElementById("trend").textContent=
-            contextoFinal && contextoFinal.valido
-                ? contextoFinal.tendenciaCall?"TENDÊNCIA DE ALTA":
-                  contextoFinal.tendenciaPut?"TENDÊNCIA DE BAIXA":"M5 SEM DIREÇÃO"
-                : "M5 SEM CONTEXTO VÁLIDO";
-        document.getElementById("lateral").textContent=
-            "Mercado lateral: "+
-            (contextoFinal && contextoFinal.valido
-                ? contextoFinal.lateral?"SIM":"NÃO"
-                : "SEM DADOS SUFICIENTES");
-
-        const sinaisAtuais=sinais.filter(s=>s.vela===m1.length);
-        const central=document.getElementById("signal");
-        const detalhes=document.getElementById("details");
-        if(sinaisAtuais.length){
-            central.textContent="SINAL IDENTIFICADO";
-            central.className="ok";
-            detalhes.innerHTML=sinaisAtuais.map(s=>
-                '<div class="item '+s.classe+'"><b>'+s.tipo+'</b></div>'
-            ).join("");
-        }else{
-            central.textContent="AGUARDANDO SINAL";
-            central.className="";
-            detalhes.textContent="Nenhum sinal identificado na última vela M1.";
-        }
-
-        const historico=document.getElementById("historico");
-        if(sinais.length){
-            historico.innerHTML=sinais.slice(-20).reverse().map(s=>
-                '<div class="item '+s.classe+'"><b>'+s.tipo+'</b> - Vela M1 '+s.vela+'</div>'
-            ).join("");
-        }else{
-            historico.textContent="Nenhum sinal encontrado nas velas analisadas.";
-        }
-        document.getElementById("status").textContent="ANÁLISE CONCLUÍDA";
-    }catch(erro){
-        document.getElementById("signal").textContent="ERRO NA ANÁLISE";
-        document.getElementById("details").textContent=erro.message;
-        document.getElementById("status").textContent="VERIFICAR DADOS";
-    }
-}
-
-/* GERENCIAMENTO DIÁRIO — SIMULADOR, SEM ENVIO DE ORDENS */
-const GESTAO_CONFIG = {
-    valores: [1, 2, 6, 18],
-    metaDiaria: 15,
-    maxPerdas: 4
-};
-const GESTAO_STORAGE_KEY = "exnova_v18_gestao_diaria_teste";
-function dataLocalChave(){
-    const d = new Date();
-    return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
-}
-function estadoInicialGestao(){
-    return {
-        data: dataLocalChave(), operacoesHoje: 0, lucroLiquidoHoje: 0,
-        perdasConsecutivas: 0, etapa: 0, aguardandoNovoSinal: true,
-        operacaoAberta: false, valorAtual: 1, totalSequencia: 0,
-        bloqueado: false, motivoBloqueio: "", historico: []
-    };
-}
-function carregarGestao(){
-    try{
-        const salvo = JSON.parse(localStorage.getItem(GESTAO_STORAGE_KEY) || "null");
-        if(salvo && salvo.data === dataLocalChave()) return {...estadoInicialGestao(), ...salvo};
-    }catch(e){}
-    return estadoInicialGestao();
-}
-let gestao = carregarGestao();
-function salvarGestao(){
-    try{localStorage.setItem(GESTAO_STORAGE_KEY, JSON.stringify(gestao));}catch(e){}
-}
-function verificarNovoDia(){
-    if(gestao.data !== dataLocalChave()){
-        gestao = estadoInicialGestao();
-        salvarGestao();
-    }
-}
-function dinheiro(valor){
-    return "US$ " + Number(valor).toFixed(2);
-}
-function bloquearGestao(motivo){
-    gestao.bloqueado = true;
-    gestao.motivoBloqueio = motivo;
-    gestao.historico.push("ROBÔ PARADO NO DIA: " + motivo);
-}
-function atualizarGestao(){
-    verificarNovoDia();
-    const status = document.getElementById("gestaoStatus");
-    const etapa = document.getElementById("gestaoEtapa");
-    const contagem = document.getElementById("gestaoContagem");
-    const total = document.getElementById("gestaoTotal");
-    const historico = document.getElementById("gestaoHistorico");
-    if(!status) return;
-    if(gestao.bloqueado){
-        status.textContent = "ROBÔ PARADO ATÉ O PRÓXIMO DIA: " + gestao.motivoBloqueio;
-        status.className = "erro";
-    }else if(gestao.operacaoAberta){
-        status.textContent = "OPERAÇÃO DE TESTE ABERTA — informe o resultado líquido.";
-        status.className = "azul";
-    }else if(gestao.aguardandoNovoSinal && gestao.perdasConsecutivas > 0){
-        status.textContent = "Aguardando um NOVO pré-alerta válido para o próximo gale.";
-        status.className = "roxo";
-    }else{
-        status.textContent = "Aguardando o primeiro pré-alerta válido.";
-        status.className = "ok";
-    }
-    const nomeEtapa = gestao.etapa === 0 ? "inicial" : gestao.etapa + "º gale";
-    etapa.textContent = gestao.bloqueado ? "Entradas suspensas" :
-        "Próxima entrada: " + dinheiro(GESTAO_CONFIG.valores[gestao.etapa]) + " (" + nomeEtapa + ")";
-    contagem.textContent = "Operações hoje: " + gestao.operacoesHoje + " | Perdas consecutivas: " +
-        gestao.perdasConsecutivas + "/" + GESTAO_CONFIG.maxPerdas;
-    total.textContent = "Lucro acumulado nas vitórias: " + dinheiro(gestao.lucroLiquidoHoje) +
-        " / Meta: " + dinheiro(GESTAO_CONFIG.metaDiaria) +
-        " | Perda na sequência atual: " + dinheiro(gestao.totalSequencia);
-    historico.innerHTML = gestao.historico.slice(-12).reverse().map(item =>
-        '<div class="item">' + item + '</div>'
-    ).join("") || "Nenhuma operação de teste registrada.";
-    const botaoSinal = document.querySelector('#gestaoOperacoes button[onclick="testeNovoPreAlerta()"]');
-    const campoResultado = document.getElementById("resultadoLiquido");
-    const botaoResultado = document.querySelector('#gestaoOperacoes button[onclick="registrarResultadoLiquido()"]');
-    if(botaoSinal) botaoSinal.disabled = gestao.bloqueado || gestao.operacaoAberta;
-    if(campoResultado) campoResultado.disabled = !gestao.operacaoAberta || gestao.bloqueado;
-    if(botaoResultado) botaoResultado.disabled = !gestao.operacaoAberta || gestao.bloqueado;
-    salvarGestao();
-}
-function testeNovoPreAlerta(){
-    verificarNovoDia();
-    if(gestao.bloqueado || gestao.operacaoAberta || !gestao.aguardandoNovoSinal) return;
-    if(gestao.lucroLiquidoHoje >= GESTAO_CONFIG.metaDiaria){
-        bloquearGestao("meta de US$ 15 em lucros acumulados nas vitórias atingida.");
-        atualizarGestao(); return;
-    }
-    gestao.valorAtual = GESTAO_CONFIG.valores[gestao.etapa];
-    gestao.operacoesHoje++;
-    gestao.operacaoAberta = true;
-    gestao.aguardandoNovoSinal = false;
-    gestao.historico.push("Operação " + gestao.operacoesHoje + ": " + dinheiro(gestao.valorAtual) +
-        " — " + (gestao.etapa === 0 ? "entrada inicial" : gestao.etapa + "º gale") +
-        " — aberta após novo pré-alerta");
-    atualizarGestao();
-}
-function registrarResultadoLiquido(){
-    verificarNovoDia();
-    if(!gestao.operacaoAberta || gestao.bloqueado) return;
-    const campo = document.getElementById("resultadoLiquido");
-    const resultado = Number(campo.value);
-    if(campo.value.trim() === "" || !Number.isFinite(resultado)){
-        alert("Informe o resultado líquido da operação em dólares. Ex.: 0.85 ou -1.00");
-        return;
-    }
-    gestao.operacaoAberta = false;
-    if(resultado > 0){
-        gestao.lucroLiquidoHoje = Number((gestao.lucroLiquidoHoje + resultado).toFixed(2));
-        gestao.historico.push("VITÓRIA: resultado líquido " + dinheiro(resultado) +
-            ". Sequência encerrada; próxima entrada volta a US$ 1.");
-        gestao.perdasConsecutivas = 0;
-        gestao.etapa = 0;
-        gestao.totalSequencia = 0;
-        gestao.aguardandoNovoSinal = true;
-    }else if(resultado < 0){
-        gestao.perdasConsecutivas++;
-        gestao.totalSequencia = Number((gestao.totalSequencia + Math.abs(resultado)).toFixed(2));
-        gestao.historico.push("LOSS: resultado líquido " + dinheiro(resultado) +
-            ". Aguardando novo pré-alerta para continuar a sequência.");
-        if(gestao.perdasConsecutivas >= GESTAO_CONFIG.maxPerdas){
-            bloquearGestao("4 perdas consecutivas (entrada inicial + 3 gales).");
-        }else{
-            gestao.etapa = gestao.perdasConsecutivas;
-            gestao.aguardandoNovoSinal = true;
-        }
-    }else{
-        gestao.historico.push("RESULTADO ZERO: sem lucro ou prejuízo. Próxima tentativa mantém o mesmo valor.");
-        gestao.aguardandoNovoSinal = true;
-    }
-    campo.value = "";
-    if(gestao.lucroLiquidoHoje >= GESTAO_CONFIG.metaDiaria){
-        bloquearGestao("meta de US$ 15 em lucros acumulados nas vitórias atingida.");
-    }
-    atualizarGestao();
-}
-function reiniciarTesteGestao(){
-    if(!confirm("Reiniciar os dados de teste deste dia? Isso apagará o histórico e o resultado acumulado mostrado neste navegador.")) return;
-    gestao = estadoInicialGestao();
-    salvarGestao();
-    const campo = document.getElementById("resultadoLiquido");
-    if(campo) campo.value = "";
-    atualizarGestao();
-}
-
-
-atualizarGestao();
-
-// Se o usuário já havia conectado antes, tenta retomar ao reabrir/recarregar o site.
-try{
-    if(localStorage.getItem(DERIV_AUTO_KEY) === "1"){
-        reconexaoAtiva = true;
-        conectarDeriv(true);
-    }
-}catch(e){}
-
-</script>
-</body>
-</html>
+    if(!Array.isArray(velas) || velas.length<22) 
