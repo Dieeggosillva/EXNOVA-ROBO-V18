@@ -28,7 +28,7 @@ small{color:#aab6c5}
 <body>
 <header>
 <h1>EXNOVA ROBÔ V18</h1>
-<p>Motor estratégico — validação + gerenciamento em teste</p>
+<p>Motor estratégico — sinais M1/M5 + execução automática DEMO</p>
 <p id="status">AGUARDANDO DADOS</p>
 </header>
 
@@ -42,6 +42,16 @@ small{color:#aab6c5}
 <p>Pré-alertas estratégicos: <b>5 velas</b></p>
 </div>
 
+<div class="card" id="backendDeriv">
+<h3>Conexão segura — Deriv DEMO</h3>
+<p id="backendStatus" class="erro">BACKEND NÃO CONECTADO</p>
+<label for="serverAccessKey">Chave SERVER_ACCESS_KEY configurada no Render</label>
+<input id="serverAccessKey" type="password" autocomplete="off" placeholder="Cole a chave do servidor" style="width:100%;padding:12px;border-radius:8px;border:1px solid #526078;background:#10151f;color:white;margin-top:6px">
+<button type="button" onclick="testarBackend()">TESTAR SERVIDOR</button>
+<p id="backendConta">Conta: ainda não validada.</p>
+<small>A chave é usada somente nesta página aberta. Nunca a envie por mensagem nem a coloque no HTML.</small>
+</div>
+
 <div class="card">
 <h3>Conexão Deriv — dados públicos</h3>
 <p id="apiStatus">API: DESCONECTADA</p>
@@ -51,18 +61,6 @@ small{color:#aab6c5}
 <button onclick="conectarDeriv()">CONECTAR À DERIV — VOLATILITY 100 (1s)</button>
 <button onclick="desconectarDeriv()">PARAR ATUALIZAÇÃO</button>
 <small>Fonte: transmissão pública de cotações da Deriv. Esta etapa não usa token e não envia ordens.</small>
-</div>
-
-
-<div class="card" id="backendDeriv">
-<h3>Conexão segura — servidor Deriv DEMO</h3>
-<p id="backendStatus" class="erro">BACKEND NÃO TESTADO</p>
-<label for="serverAccessKey">Chave SERVER_ACCESS_KEY do Render</label>
-<input id="serverAccessKey" type="password" autocomplete="off" placeholder="Cole aqui a chave do servidor" style="width:100%;padding:12px;border-radius:8px;border:1px solid #526078;background:#10151f;color:white;margin-top:6px">
-<button type="button" onclick="testarBackend()">TESTAR SERVIDOR</button>
-<button type="button" onclick="validarContaDemo()">VALIDAR CONTA DEMO + WEBSOCKET</button>
-<p id="backendConta">Conta DEMO: ainda não verificada.</p>
-<small>A chave fica somente na memória desta página enquanto ela estiver aberta. Não a coloque no código HTML nem envie por mensagem. Esta etapa apenas testa o servidor e a conexão DEMO; ainda não envia operações.</small>
 </div>
 
 <div class="card">
@@ -107,22 +105,23 @@ small{color:#aab6c5}
 
 
 <div class="card" id="gestaoOperacoes">
-<h3>Gerenciamento de operações — TESTE</h3>
-<p class="erro"><b>MODO DE TESTE:</b> este painel não envia ordens à Deriv.</p>
-<p>Valor inicial: <b>US$ 1</b> | Meta diária líquida: <b>US$ 15</b></p>
-<p>Progressão: <b>US$ 1 → US$ 2 → US$ 6 → US$ 18</b></p>
-<p>Parada por perda: <b>4 perdas consecutivas</b> (entrada inicial + 3 gales)</p>
-<p id="gestaoStatus" class="ok">Aguardando o primeiro pré-alerta válido.</p>
-<p id="gestaoEtapa">Próxima entrada: US$ 1 (inicial)</p>
-<p id="gestaoContagem">Operações hoje: 0 | Perdas consecutivas: 0/4</p>
-<p id="gestaoTotal">Lucro acumulado nas vitórias: US$ 0,00 / Meta: US$ 15,00</p>
-<button type="button" onclick="testeNovoPreAlerta()">SIMULAR NOVO PRÉ-ALERTA VÁLIDO</button>
-<label for="resultadoLiquido" style="display:block;margin-top:12px">Lucro ou perda da operação (US$): informe o lucro líquido positivo na vitória ou o valor negativo na perda</label>
-<input id="resultadoLiquido" type="number" step="0.01" placeholder="Ex.: 0.85 ou -1.00" style="width:100%;padding:12px;border-radius:8px;border:1px solid #526078;background:#10151f;color:white;margin-top:6px">
-<button type="button" onclick="registrarResultadoLiquido()">REGISTRAR RESULTADO DA OPERAÇÃO</button>
-<button type="button" onclick="reiniciarTesteGestao()">REINICIAR TESTE DO DIA</button>
-<small>A meta soma somente os lucros positivos das operações vencedoras. As perdas dos gales NÃO são descontadas da meta. O robô simulado para ao acumular US$ 15 em lucros ou após 4 perdas consecutivas. O gale só começa após um novo pré-alerta válido. Este painel ainda não recebe resultados automaticamente da Deriv.</small>
-<div id="gestaoHistorico" aria-live="polite"></div>
+<h3>Robô automático — somente DEMO</h3>
+<p class="erro"><b>SEGURANÇA:</b> modo REAL bloqueado. O robô só envia ordens depois da validação DEMO e do botão INICIAR.</p>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+ <div><label for="stakeInicial">Stake inicial (US$)</label><input id="stakeInicial" type="number" min="0.35" max="5" step="0.01" value="0.35" style="width:100%;padding:10px;background:#10151f;color:white;border:1px solid #526078;border-radius:8px"></div>
+ <div><label for="metaDiaria">Meta diária líquida (US$)</label><input id="metaDiaria" type="number" min="0.01" step="0.01" value="15" style="width:100%;padding:10px;background:#10151f;color:white;border:1px solid #526078;border-radius:8px"></div>
+ <div><label>Multiplicador dos Gales</label><input value="3x" disabled style="width:100%;padding:10px;background:#10151f;color:#aab6c5;border:1px solid #526078;border-radius:8px"></div>
+ <div><label>Máximo de Gales</label><input value="15" disabled style="width:100%;padding:10px;background:#10151f;color:#aab6c5;border:1px solid #526078;border-radius:8px"></div>
+</div>
+<p id="autoStatus" class="ok">Robô desligado. Valide o backend DEMO para começar.</p>
+<p id="autoProxima">Próxima entrada: US$ 0,35 (inicial)</p>
+<p id="autoResumo">Operações: 0 | Gales: 0/15 | Resultado líquido: US$ 0,00</p>
+<p id="autoDirecao">Última direção: --</p>
+<button type="button" id="btnIniciarAuto" onclick="iniciarRoboDemo()">INICIAR ROBÔ AUTOMÁTICO DEMO</button>
+<button type="button" id="btnPararAuto" onclick="pararRoboDemo('Parada solicitada pelo usuário.')" disabled>PARAR ROBÔ</button>
+<button type="button" onclick="reiniciarContadoresAuto()">ZERAR RESULTADO/HISTÓRICO</button>
+<div id="autoHistorico" aria-live="polite"></div>
+<small>O robô ignora CALL/PUT CONFIRMADO e usa somente PRÉ-CALL/PRÉ-PUT ORIGINAL e ESTRATÉGICO. Sinais da mesma direção no mesmo candle são agrupados. A próxima direção é atualizada pelo último pré-alerta. A progressão é stake inicial × 3 por Gale. O servidor limita cada ordem a US$ 5 por segurança; quando a próxima stake ultrapassar esse teto, o robô interrompe a sequência sem enviar a ordem. Portanto, 15 Gales ficam configurados como limite máximo, não como garantia de execução.</small>
 </div>
 
 <div class="card">
@@ -144,6 +143,7 @@ let ultimoM5 = [];
 let derivReqId = 1;
 let derivLiveCandle = null;
 let ultimaVelaM1Analisada = null;
+let processarSinalAutomatico = false;
 
 function construirM5(velas){
     const grupos = new Map();
@@ -195,7 +195,8 @@ function atualizarPainelDeriv(){
         // A análise e a contagem só avançam quando uma nova vela M1 fecha (60 segundos).
         if(ultimaFechada !== ultimaVelaM1Analisada){
             ultimaVelaM1Analisada = ultimaFechada;
-            analisar();
+            processarSinalAutomatico = true;
+            try { analisar(); } finally { processarSinalAutomatico = false; }
         }
     } else {
         document.getElementById("signal").textContent = "AGUARDANDO HISTÓRICO SUFICIENTE";
@@ -301,6 +302,7 @@ function conectarDeriv(automatico=false){
 }
 
 function desconectarDeriv(){
+    if(typeof roboAtivo !== "undefined" && roboAtivo) pararRoboDemo("Dados públicos desconectados; robô pausado.");
     reconexaoAtiva = false;
     try{localStorage.removeItem(DERIV_AUTO_KEY);}catch(e){}
     atrasoReconexao = 1500;
@@ -330,84 +332,6 @@ document.addEventListener("visibilitychange", ()=>{
 });
 window.addEventListener("pageshow", reconectarAoRetornar);
 window.addEventListener("online", reconectarAoRetornar);
-
-
-/* CONEXÃO COM BACKEND — TESTES SEM ENVIO DE ORDENS */
-const EXNOVA_BACKEND_URL = "https://exnova-robo-v18-backend.onrender.com";
-let exnovaServerKey = "";
-
-function atualizarBackendStatus(texto, erro=false){
-    const el = document.getElementById("backendStatus");
-    if(!el) return;
-    el.textContent = texto;
-    el.className = erro ? "erro" : "ok";
-}
-
-async function backendFetch(path, options={}){
-    const headers = {
-        "Content-Type": "application/json",
-        ...(exnovaServerKey ? {"x-server-key": exnovaServerKey} : {}),
-        ...(options.headers || {})
-    };
-    const response = await fetch(EXNOVA_BACKEND_URL + path, {
-        ...options,
-        headers,
-        cache: "no-store"
-    });
-    let data = {};
-    try { data = await response.json(); } catch(e) {}
-    if(!response.ok) throw new Error(data.error || ("HTTP " + response.status));
-    return data;
-}
-
-async function testarBackend(){
-    atualizarBackendStatus("TESTANDO SERVIDOR...");
-    try{
-        const response = await fetch(EXNOVA_BACKEND_URL + "/health", {cache:"no-store"});
-        if(!response.ok) throw new Error("Servidor respondeu HTTP " + response.status);
-        const data = await response.json();
-        if(data.status !== "online" || data.mode !== "DEMO" || data.trading !== "demo-only"){
-            throw new Error("Resposta inesperada do servidor. Confira o deploy.");
-        }
-        atualizarBackendStatus("SERVIDOR ONLINE — MODO DEMO CONFIRMADO");
-    }catch(erro){
-        atualizarBackendStatus("FALHA NO SERVIDOR: " + erro.message, true);
-    }
-}
-
-async function validarContaDemo(){
-    const campo = document.getElementById("serverAccessKey");
-    const chave = campo ? campo.value.trim() : "";
-    if(!chave){
-        atualizarBackendStatus("INFORME A CHAVE DO SERVIDOR PARA VALIDAR A CONTA.", true);
-        return;
-    }
-    exnovaServerKey = chave;
-    atualizarBackendStatus("VALIDANDO CONTA DEMO...");
-    document.getElementById("backendConta").textContent = "Consultando conta DEMO e WebSocket...";
-    try{
-        const conta = await backendFetch("/api/deriv/accounts", {
-            method:"POST", body:JSON.stringify({})
-        });
-        if(!conta.ok || !conta.account || String(conta.account.accountType).toLowerCase() !== "demo"){
-            throw new Error("O servidor não confirmou uma conta DEMO.");
-        }
-        const ws = await backendFetch("/api/deriv/otp", {
-            method:"POST", body:JSON.stringify({})
-        });
-        if(!ws.ok || ws.mode !== "DEMO" || ws.websocketReady !== true){
-            throw new Error("WebSocket DEMO não foi confirmado.");
-        }
-        document.getElementById("backendConta").textContent =
-            "Conta DEMO validada — moeda: " + (conta.account.currency || "USD") +
-            " | WebSocket DEMO: conectado com sucesso.";
-        atualizarBackendStatus("BACKEND + CONTA DEMO + WEBSOCKET OK");
-    }catch(erro){
-        document.getElementById("backendConta").textContent = "Validação não concluída.";
-        atualizarBackendStatus("ERRO NA VALIDAÇÃO: " + erro.message, true);
-    }
-}
-
 
 /* INDICADORES */
 function emaSeries(valores,periodo){
@@ -449,4 +373,66 @@ function rsiSeries(valores,periodo=14){
 }
 
 function validarVelas(velas){
-    if(!Array.isArray(velas) || velas.length<22) 
+    if(!Array.isArray(velas) || velas.length<22) return false;
+    return velas.every(v=>v && ["open","high","low","close"].every(k=>Number.isFinite(Number(v[k]))));
+}
+
+/* TESTE SIMULADO */
+function gerarVelas(preco,quantidade,variacao){
+    const velas=[];
+    for(let i=0;i<quantidade;i++){
+        const abertura=preco;
+        const fechamento=abertura+variacao;
+        velas.push({
+            open:Number(abertura.toFixed(6)),
+            high:Number((Math.max(abertura,fechamento)+0.00010).toFixed(6)),
+            low:Number((Math.min(abertura,fechamento)-0.00010).toFixed(6)),
+            close:Number(fechamento.toFixed(6))
+        });
+        preco=fechamento;
+    }
+    return velas;
+}
+
+function carregarTeste(){
+    try{
+        desconectarDeriv();
+        const base=Date.now()-3600000;
+        const m1=gerarVelas(1.100000,300,0.000002).map((v,i)=>({
+            ...v,openTime:new Date(base+i*60000).toISOString()
+        }));
+        const m5=construirM5(m1);
+        document.getElementById("m1").value=JSON.stringify(m1);
+        document.getElementById("m5").value=JSON.stringify(m5);
+        document.getElementById("testeStatus").textContent="TESTE SIMULADO — NÃO SÃO DADOS REAIS";
+        document.getElementById("testeStatus").className="ok";
+        document.getElementById("testeM1").textContent="Velas M1: "+m1.length;
+        document.getElementById("testeM5").textContent="Velas M5: "+m5.length;
+        document.getElementById("status").textContent="DADOS DE TESTE CARREGADOS";
+        analisar();
+    }catch(erro){
+        document.getElementById("testeStatus").textContent="ERRO: "+erro.message;
+    }
+}
+
+/*
+REPRODUÇÃO DAS REGRAS ENVIADAS:
+- Para cada vela M1, usa somente a última M5 que já estaria fechada
+  no horário de fechamento daquela M1.
+- Não aplica a tendência M5 mais recente retroativamente a todo o histórico.
+- Contadores originais: 3 velas; módulo estratégico separado: 5 velas.
+*/
+function analisar(){
+    try{
+        const m1=JSON.parse(document.getElementById("m1").value);
+        const m5=JSON.parse(document.getElementById("m5").value);
+        if(!validarVelas(m1)||!validarVelas(m5)){
+            throw new Error("Insira pelo menos 22 velas válidas em M1 e M5.");
+        }
+
+        m1.sort((a,b)=>Date.parse(a.openTime||0)-Date.parse(b.openTime||0));
+        m5.sort((a,b)=>Date.parse(a.openTime||0)-Date.parse(b.openTime||0));
+
+        const fechamentos=m1.map(v=>Number(v.close));
+        const fechamentos5=m5.map(v=>Number(v.close));
+        const e9=emaSer
