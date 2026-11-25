@@ -397,7 +397,7 @@ function gerarVelas(preco,quantidade,variacao){
 function carregarTeste(){
     try{
         desconectarDeriv();
-        const base=Date.now()-3600000;
+        const base=Math.floor(Date.now()/60000)*60000-300*60000;
         const m1=gerarVelas(1.100000,300,0.000002).map((v,i)=>({
             ...v,openTime:new Date(base+i*60000).toISOString()
         }));
@@ -435,4 +435,376 @@ function analisar(){
 
         const fechamentos=m1.map(v=>Number(v.close));
         const fechamentos5=m5.map(v=>Number(v.close));
-        const e9=emaSer
+        const e9=emaSeries(fechamentos,9);
+        const e21=emaSeries(fechamentos,21);
+        const rsi=rsiSeries(fechamentos,14);
+        const e9m5=emaSeries(fechamentos5,9);
+        const e21m5=emaSeries(fechamentos5,21);
+        const temposM5=m5.map(v=>Date.parse(v.openTime));
+
+        function contextoM5(tempoFechamentoM1){
+            let idx=-1;
+            for(let j=0;j<temposM5.length;j++){
+                if(temposM5[j]+300000<=tempoFechamentoM1) idx=j;
+                else break;
+            }
+            if(idx<3) return {valido:false,tendenciaCall:false,tendenciaPut:false,lateral:false,idx};
+            const idade=tempoFechamentoM1-(temposM5[idx]+300000);
+            if(idade>300000) return {valido:false,tendenciaCall:false,tendenciaPut:false,lateral:false,idx};
+            const fechamento5=fechamentos5[idx];
+            const tendenciaCall=fechamento5>e21m5[idx] && e21m5[idx]>e21m5[idx-1];
+            const tendenciaPut=fechamento5<e21m5[idx] && e21m5[idx]<e21m5[idx-1];
+            const distanciaMedias=Math.abs(e9m5[idx]-e21m5[idx]);
+            const inclinacaoEma=Math.abs(e21m5[idx]-e21m5[idx-2]);
+            const lateral=distanciaMedias<fechamento5*0.00035 &&
+                          inclinacaoEma<fechamento5*0.00025;
+            return {valido:true,tendenciaCall,tendenciaPut,lateral,idx};
+        }
+
+        let callRestante=0,putRestante=0,novoCallRestante=0,novoPutRestante=0;
+        const sinais=[];
+        let contextoAtual=null;
+
+        for(let i=0;i<m1.length;i++){
+            if(rsi[i]===null) continue;
+            const tempoM1=Date.parse(m1[i].openTime);
+            const contexto=Number.isFinite(tempoM1)
+                ? contextoM5(tempoM1+60000)
+                : {valido:false,tendenciaCall:false,tendenciaPut:false,lateral:false};
+            contextoAtual=contexto;
+
+            const abertura=Number(m1[i].open);
+            const fechamento=Number(m1[i].close);
+            const tendenciaCall=contexto.valido && contexto.tendenciaCall;
+            const tendenciaPut=contexto.valido && contexto.tendenciaPut;
+            const mercadoLateral=contexto.valido && contexto.lateral;
+
+            const callForte=tendenciaCall && fechamento>abertura &&
+                fechamento>e9[i] && e9[i]>e21[i] && rsi[i]>52;
+            const putForte=tendenciaPut && fechamento<abertura &&
+                fechamento<e9[i] && e9[i]<e21[i] && rsi[i]<48;
+
+            const preCallBruto=tendenciaCall && e9[i]>e21[i] &&
+                rsi[i]>=45 && rsi[i]<=52 && !callForte;
+            const prePutBruto=tendenciaPut && e9[i]<e21[i] &&
+                rsi[i]>=48 && rsi[i]<=55 && !putForte;
+
+            const preCall=preCallBruto && callRestante<=0;
+            const prePut=prePutBruto && putRestante<=0;
+            if(preCall) callRestante=3;
+            else if(callRestante>0) callRestante--;
+            if(prePut) putRestante=3;
+            else if(putRestante>0) putRestante--;
+
+            const novoPrePutBruto=tendenciaPut && !mercadoLateral &&
+                e9[i]<e21[i] && fechamento<e21[i] &&
+                fechamento>abertura && rsi[i]>40 && rsi[i]<55 && !putForte;
+            const novoPreCallBruto=tendenciaCall && !mercadoLateral &&
+                e9[i]>e21[i] && fechamento>e21[i] &&
+                fechamento<abertura && rsi[i]>45 && rsi[i]<60 && !callForte;
+
+            const novoPreCall=novoPreCallBruto && novoCallRestante<=0;
+            const novoPrePut=novoPrePutBruto && novoPutRestante<=0;
+            if(novoPreCall) novoCallRestante=5;
+            else if(novoCallRestante>0) novoCallRestante--;
+            if(novoPrePut) novoPutRestante=5;
+            else if(novoPutRestante>0) novoPutRestante--;
+
+            if(callForte) sinais.push({tipo:"CALL CONFIRMADO",classe:"verde",vela:i+1});
+            if(putForte) sinais.push({tipo:"PUT CONFIRMADO",classe:"vermelho",vela:i+1});
+            if(preCall) sinais.push({tipo:"PRÉ-CALL ORIGINAL",classe:"azul",vela:i+1});
+            if(prePut) sinais.push({tipo:"PRÉ-PUT ORIGINAL",classe:"roxo",vela:i+1});
+            if(novoPreCall) sinais.push({tipo:"PRÉ-CALL ESTRATÉGICO",classe:"verde",vela:i+1});
+            if(novoPrePut) sinais.push({tipo:"PRÉ-PUT ESTRATÉGICO",classe:"vermelho",vela:i+1});
+        }
+
+        const ultimo=m1.length-1;
+        document.getElementById("ema9").textContent=e9[ultimo].toFixed(6);
+        document.getElementById("ema21").textContent=e21[ultimo].toFixed(6);
+        document.getElementById("rsi").textContent=rsi[ultimo]===null?"--":rsi[ultimo].toFixed(2);
+
+        const contextoFinal=Number.isFinite(Date.parse(m1[ultimo].openTime))
+            ? contextoM5(Date.parse(m1[ultimo].openTime)+60000)
+            : contextoAtual;
+
+        document.getElementById("trend").textContent=
+            contextoFinal && contextoFinal.valido
+                ? contextoFinal.tendenciaCall?"TENDÊNCIA DE ALTA":
+                  contextoFinal.tendenciaPut?"TENDÊNCIA DE BAIXA":"M5 SEM DIREÇÃO"
+                : "M5 SEM CONTEXTO VÁLIDO";
+        document.getElementById("lateral").textContent=
+            "Mercado lateral: "+
+            (contextoFinal && contextoFinal.valido
+                ? contextoFinal.lateral?"SIM":"NÃO"
+                : "SEM DADOS SUFICIENTES");
+
+        const sinaisAtuais=sinais.filter(s=>s.vela===m1.length);
+        if(processarSinalAutomatico) receberPreAlertas(sinaisAtuais, m1[ultimo]);
+        const central=document.getElementById("signal");
+        const detalhes=document.getElementById("details");
+        if(sinaisAtuais.length){
+            central.textContent="SINAL IDENTIFICADO";
+            central.className="ok";
+            detalhes.innerHTML=sinaisAtuais.map(s=>
+                '<div class="item '+s.classe+'"><b>'+s.tipo+'</b></div>'
+            ).join("");
+        }else{
+            central.textContent="AGUARDANDO SINAL";
+            central.className="";
+            detalhes.textContent="Nenhum sinal identificado na última vela M1.";
+        }
+
+        const historico=document.getElementById("historico");
+        if(sinais.length){
+            historico.innerHTML=sinais.slice(-20).reverse().map(s=>
+                '<div class="item '+s.classe+'"><b>'+s.tipo+'</b> - Vela M1 '+s.vela+'</div>'
+            ).join("");
+        }else{
+            historico.textContent="Nenhum sinal encontrado nas velas analisadas.";
+        }
+        document.getElementById("status").textContent="ANÁLISE CONCLUÍDA";
+    }catch(erro){
+        document.getElementById("signal").textContent="ERRO NA ANÁLISE";
+        document.getElementById("details").textContent=erro.message;
+        document.getElementById("status").textContent="VERIFICAR DADOS";
+    }
+}
+
+/* EXECUÇÃO AUTOMÁTICA DEMO — ORDENS VIA BACKEND SEGURO */
+const EXNOVA_BACKEND_URL = "https://exnova-robo-v18-backend.onrender.com";
+const STAKE_MIN = 0.35;
+const STAKE_SERVER_MAX = 5;
+const MAX_GALES = 15;
+const AUTO_STORAGE_KEY = "exnova_v18_auto_demo_state";
+let serverKey = "";
+let backendSocket = null;
+let backendSessionToken = "";
+let backendValidated = false;
+let backendReady = false;
+let roboAtivo = false;
+let propostaPendente = false;
+let compraPendente = false;
+let contratoAtivo = false;
+let contratoIdAtivo = null;
+let reqAutoId = 5000;
+let direcaoAtual = null;
+let ultimaVelaSinalProcessada = null;
+let timerEntrada = null;
+let estadoAuto = carregarEstadoAuto();
+
+function lerConfigAuto(){
+    const inicial = Number(document.getElementById("stakeInicial")?.value);
+    const meta = Number(document.getElementById("metaDiaria")?.value);
+    return {inicial,meta};
+}
+function chaveDiaAuto(){const d=new Date();return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");}
+function estadoAutoInicial(){return {dia:chaveDiaAuto(),operacoes:0,gale:0,lucroLiquido:0,sequenciaAtiva:false,aguardando:false,travado:false,motivo:"",historico:[]};}
+function carregarEstadoAuto(){try{const x=JSON.parse(localStorage.getItem(AUTO_STORAGE_KEY)||"null");if(x&&x.dia===chaveDiaAuto())return {...estadoAutoInicial(),...x};}catch(e){}return estadoAutoInicial();}
+function salvarEstadoAuto(){try{localStorage.setItem(AUTO_STORAGE_KEY,JSON.stringify(estadoAuto));}catch(e){}}
+function dinheiroAuto(v){return "US$ "+Number(v||0).toFixed(2);}
+function stakeDaEtapa(){return Number((lerConfigAuto().inicial*Math.pow(3,estadoAuto.gale)).toFixed(2));}
+function logAuto(msg){estadoAuto.historico.unshift(new Date().toLocaleTimeString("pt-BR")+" — "+msg);estadoAuto.historico=estadoAuto.historico.slice(0,25);salvarEstadoAuto();atualizarPainelAuto();}
+function atualizarPainelAuto(){
+    const status=document.getElementById("autoStatus");if(!status)return;
+    const stake=stakeDaEtapa();
+    status.textContent=estadoAuto.travado?"ROBÔ BLOQUEADO: "+estadoAuto.motivo:contratoAtivo?"OPERAÇÃO DEMO ABERTA — aguardando resultado":propostaPendente||compraPendente?"ORDEM DEMO EM PROCESSAMENTO — aguardando confirmação":roboAtivo?"ROBÔ ATIVO — monitorando pré-alertas M1":estadoAuto.aguardando?"AGUARDANDO NOVO PRÉ-ALERTA APÓS RESULTADO ZERO":"ROBÔ DESLIGADO";
+    status.className=estadoAuto.travado?"erro":roboAtivo?"ok":"azul";
+    document.getElementById("autoProxima").textContent="Próxima entrada: "+dinheiroAuto(stake)+" ("+(estadoAuto.gale===0?"inicial":estadoAuto.gale+"º Gale")+")";
+    document.getElementById("autoResumo").textContent="Operações: "+estadoAuto.operacoes+" | Gales: "+estadoAuto.gale+"/"+MAX_GALES+" | Resultado líquido: "+dinheiroAuto(estadoAuto.lucroLiquido)+" / Meta: "+dinheiroAuto(lerConfigAuto().meta);
+    document.getElementById("autoDirecao").textContent="Última direção: "+(direcaoAtual||"--");
+    document.getElementById("autoHistorico").innerHTML=estadoAuto.historico.map(x=>'<div class="item">'+x.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))+'</div>').join("")||"Nenhuma operação registrada.";
+    document.getElementById("btnIniciarAuto").disabled=roboAtivo||estadoAuto.travado||!backendValidated||contratoAtivo||propostaPendente||compraPendente;
+    document.getElementById("btnPararAuto").disabled=!roboAtivo;
+    salvarEstadoAuto();
+}
+async function testarBackend(){
+    const campo=document.getElementById("serverAccessKey");const key=campo?.value.trim()||"";
+    if(!key){atualizarBackendStatus("INFORME A CHAVE SERVER_ACCESS_KEY.",true);return;}
+    serverKey=key;atualizarBackendStatus("TESTANDO BACKEND...");
+    try{
+        const r=await fetch(EXNOVA_BACKEND_URL+"/health",{cache:"no-store"});
+        const d=await r.json();if(!r.ok||d.status!=="online"||d.mode!=="DEMO"||d.trading!=="demo-only")throw new Error("O servidor não confirmou modo DEMO.");
+        const a=await fetch(EXNOVA_BACKEND_URL+"/api/deriv/accounts",{method:"POST",headers:{"Content-Type":"application/json","x-server-key":serverKey},body:"{}",cache:"no-store"});
+        const ad=await a.json();if(!a.ok||!ad.ok||!ad.account||String(ad.account.accountType||ad.account.account_type).toLowerCase()!=="demo")throw new Error(ad.error||"Conta DEMO não confirmada.");
+        backendValidated=true;document.getElementById("backendConta").textContent="Conta DEMO validada: "+(ad.account.currency||"USD")+". Nenhuma ordem enviada.";
+        atualizarBackendStatus("BACKEND ONLINE — CONTA DEMO VALIDADA");atualizarPainelAuto();
+    }catch(e){backendValidated=false;atualizarBackendStatus("FALHA: "+e.message,true);document.getElementById("backendConta").textContent="Conta não validada.";atualizarPainelAuto();}
+}
+function atualizarBackendStatus(t,erro=false){const e=document.getElementById("backendStatus");if(e){e.textContent=t;e.className=erro?"erro":"ok";}}
+async function iniciarRoboDemo(){
+    if(!backendValidated||!serverKey){alert("Primeiro teste e valide a conta DEMO.");return;}
+    if(!reconexaoAtiva||!derivSocket||derivSocket.readyState!==WebSocket.OPEN){alert("Conecte primeiro os dados públicos da Deriv e aguarde o histórico M1/M5.");return;}
+    if(estadoAuto.travado){alert("Robô bloqueado: "+estadoAuto.motivo);return;}
+    if(contratoAtivo||propostaPendente||compraPendente){alert("Existe uma operação ou solicitação anterior em andamento. Aguarde a confirmação.");return;}
+    const c=lerConfigAuto();
+    if(!Number.isFinite(c.inicial)||c.inicial<STAKE_MIN||c.inicial>STAKE_SERVER_MAX){alert("Stake inicial deve ficar entre US$ 0,35 e US$ 5,00.");return;}
+    if(!Number.isFinite(c.meta)||c.meta<=0){alert("Informe uma meta diária maior que zero.");return;}
+    try{
+        if(backendSocket){try{backendSocket.close();}catch(_){}backendSocket=null;}
+        backendReady=false;
+        const r=await fetch(EXNOVA_BACKEND_URL+"/api/deriv/session",{method:"POST",headers:{"Content-Type":"application/json","x-server-key":serverKey},body:"{}",cache:"no-store"});
+        const d=await r.json();
+        if(!r.ok||!d.ok||d.mode!=="DEMO"||!d.session_token||!d.websocket)throw new Error(d.error||"O servidor não confirmou uma sessão DEMO válida.");
+        if(Number(d.max_stake)>0 && c.inicial>Number(d.max_stake))throw new Error("A stake inicial excede o limite informado pelo servidor.");
+        backendSessionToken=d.session_token;
+        const wsUrl=d.websocket+"?session="+encodeURIComponent(backendSessionToken);
+        backendSocket=new WebSocket(wsUrl);
+        atualizarBackendStatus("CONECTANDO AO CANAL DEMO; AGUARDANDO CONFIRMAÇÃO DO SERVIDOR...");
+        const socketAtual=backendSocket;
+        const timeoutReady=setTimeout(()=>{
+            if(socketAtual===backendSocket&&!backendReady){logAuto("Tempo esgotado aguardando o canal Deriv DEMO. Robô não foi armado.");try{socketAtual.close();}catch(_){}backendReady=false;roboAtivo=false;atualizarBackendStatus("TEMPO ESGOTADO NA CONEXÃO DEMO",true);atualizarPainelAuto();}
+        },15000);
+        backendSocket.onopen=()=>{
+            if(socketAtual!==backendSocket)return;
+            // O WebSocket do navegador abrir não significa que o upstream Deriv já esteja pronto.
+            atualizarBackendStatus("CANAL LOCAL ABERTO — AGUARDANDO DERIV DEMO...");
+        };
+        backendSocket.onmessage=e=>{
+            if(socketAtual!==backendSocket)return;
+            let mensagem;try{mensagem=JSON.parse(e.data);}catch(_){return;}
+            if(mensagem.msg_type==="server_ready"){
+                if(mensagem.mode!=="DEMO"){logAuto("Servidor não confirmou modo DEMO. Conexão encerrada.");try{socketAtual.close();}catch(_){}return;}
+                clearTimeout(timeoutReady);
+                backendReady=true;roboAtivo=true;backendValidated=true;
+                atualizarBackendStatus("WEBSOCKET DERIV DEMO PRONTO — CONTA DEMO");
+                socketAtual.send(JSON.stringify({balance:1,subscribe:1,req_id:reqAutoId++}));
+                logAuto("Canal Deriv DEMO confirmado pelo servidor. Robô iniciado; aguardando novo pré-alerta M1.");
+                atualizarPainelAuto();
+                return;
+            }
+            if(mensagem.msg_type==="server_closed"){
+                backendReady=false;roboAtivo=false;logAuto("Canal upstream DEMO encerrado pelo servidor. Robô pausado por segurança.");
+                atualizarPainelAuto();return;
+            }
+            processarMensagemDeriv(mensagem);
+        };
+        backendSocket.onerror=()=>{if(socketAtual===backendSocket){backendReady=false;roboAtivo=false;logAuto("Erro no WebSocket DEMO; novas entradas pausadas.");atualizarPainelAuto();}};
+        backendSocket.onclose=()=>{
+            clearTimeout(timeoutReady);
+            if(socketAtual!==backendSocket)return;
+            backendReady=false;
+            if(roboAtivo){roboAtivo=false;logAuto("Conexão DEMO encerrada. Robô pausado por segurança.");}
+            backendSocket=null;atualizarBackendStatus("WEBSOCKET DEMO DESCONECTADO",true);atualizarPainelAuto();
+        };
+    }catch(e){backendReady=false;roboAtivo=false;alert("Não foi possível iniciar: "+e.message);atualizarBackendStatus("ERRO AO INICIAR DEMO: "+e.message,true);atualizarPainelAuto();}
+}
+function pararRoboDemo(motivo="Robô pausado."){
+    roboAtivo=false;
+    if(timerEntrada){clearTimeout(timerEntrada);timerEntrada=null;}
+    // Não fecha o canal enquanto uma compra estiver em trânsito: precisamos descobrir
+    // se a Deriv abriu o contrato e, se abriu, acompanhar o resultado até o fim.
+    if(contratoAtivo||compraPendente||propostaPendente){
+        logAuto(motivo+(contratoAtivo?" O contrato já aberto continuará sendo monitorado até encerrar.":compraPendente?" A compra está em trânsito; aguardando confirmação para não perder o acompanhamento.":" A proposta pendente será descartada sem enviar compra."));
+        atualizarPainelAuto();return;
+    }
+    backendReady=false;
+    if(backendSocket){const s=backendSocket;backendSocket=null;s.onclose=null;try{s.close();}catch(e){}}
+    logAuto(motivo);atualizarPainelAuto();
+}
+function receberPreAlertas(sinais,candle){
+    if(!roboAtivo||!backendReady||!candle)return;
+    const tipos=new Set(sinais.map(s=>s.tipo));
+    const call=tipos.has("PRÉ-CALL ORIGINAL")||tipos.has("PRÉ-CALL ESTRATÉGICO");
+    const put=tipos.has("PRÉ-PUT ORIGINAL")||tipos.has("PRÉ-PUT ESTRATÉGICO");
+    if(call===put)return; // nenhum sinal ou conflito CALL/PUT no mesmo candle
+    const nova=call?"CALL":"PUT";
+    const candleKey=candle.openTime||String(candle.close);
+    if(candleKey===ultimaVelaSinalProcessada)return;
+    ultimaVelaSinalProcessada=candleKey;
+    direcaoAtual=nova;
+    estadoAuto.aguardando=false;
+    if(!estadoAuto.sequenciaAtiva){estadoAuto.sequenciaAtiva=true;estadoAuto.gale=0;estadoAuto.aguardando=false;}
+    logAuto("PRÉ-ALERTA "+nova+" recebido. Direção definida para a próxima entrada/Gale.");
+    if(!contratoAtivo&&!propostaPendente&&!compraPendente&&!estadoAuto.aguardando) agendarEntradaNaProximaM1(nova, candle);
+}
+function agendarEntradaNaProximaM1(direcao,candle=null){
+    if(!roboAtivo||estadoAuto.travado||contratoAtivo||propostaPendente||compraPendente)return;
+    if(timerEntrada)clearTimeout(timerEntrada);
+    const stake=stakeDaEtapa();
+    if(stake>STAKE_SERVER_MAX){bloquearAuto("A próxima stake seria "+dinheiroAuto(stake)+", acima do limite seguro do servidor de US$ 5. Sequência interrompida sem enviar ordem.");return;}
+    const proximaAbertura=candle&&Number.isFinite(Date.parse(candle.openTime))?Date.parse(candle.openTime)+60000:(Math.floor(Date.now()/60000)+1)*60000;
+    const espera=Math.max(0,proximaAbertura-Date.now());
+    timerEntrada=setTimeout(()=>{timerEntrada=null;if(roboAtivo&&direcaoAtual)solicitarProposta(direcaoAtual);},Math.max(100,espera));
+    logAuto("Entrada "+direcao+" agendada para a próxima abertura M1 com stake "+dinheiroAuto(stake)+".");
+}
+function solicitarProposta(direcao){
+    if(!roboAtivo||!backendReady||!backendSocket||backendSocket.readyState!==WebSocket.OPEN||!derivSocket||derivSocket.readyState!==WebSocket.OPEN||contratoAtivo||propostaPendente||compraPendente)return;
+    const stake=stakeDaEtapa();if(stake>STAKE_SERVER_MAX){bloquearAuto("Stake excede US$ 5.");return;}
+    propostaPendente=true;
+    const req_id=reqAutoId++;
+    backendSocket.send(JSON.stringify({proposal:1,amount:stake,basis:"stake",contract_type:direcao,currency:"USD",duration:1,duration_unit:"m",underlying_symbol:DERIV_SYMBOL,req_id}));
+    logAuto("Solicitando proposta "+direcao+" — "+dinheiroAuto(stake)+".");
+}
+function processarMensagemDeriv(d){
+    if(d.error){
+        const erro=d.error.message||"erro desconhecido";
+        if(propostaPendente)propostaPendente=false;
+        if(compraPendente)compraPendente=false;
+        logAuto("Deriv/servidor recusou a solicitação: "+erro);
+        if(!roboAtivo&&!contratoAtivo&&!propostaPendente&&!compraPendente&&backendSocket){const s=backendSocket;backendSocket=null;backendReady=false;s.onclose=null;try{s.close();}catch(_){}}
+        atualizarPainelAuto();return;
+    }
+    if(d.msg_type==="proposal"&&d.proposal){
+        if(!propostaPendente)return;
+        propostaPendente=false;
+        // Se o usuário parou enquanto a proposta estava em trânsito, não compra.
+        if(!roboAtivo||!backendReady){logAuto("Proposta recebida após a pausa; descartada sem compra.");if(backendSocket&&!contratoAtivo){const s=backendSocket;backendSocket=null;backendReady=false;s.onclose=null;try{s.close();}catch(_){}}atualizarPainelAuto();return;}
+        const p=d.proposal;
+        if(!p.id||!Number.isFinite(Number(p.ask_price))||Number(p.ask_price)<STAKE_MIN||Number(p.ask_price)>STAKE_SERVER_MAX){logAuto("Proposta recebida sem ID/preço válido ou fora do limite seguro.");atualizarPainelAuto();return;}
+        compraPendente=true;
+        backendSocket.send(JSON.stringify({buy:p.id,price:Number(p.ask_price),req_id:reqAutoId++}));
+        logAuto("Proposta válida recebida. Enviando compra exclusivamente DEMO.");atualizarPainelAuto();return;
+    }
+    if(d.msg_type==="buy"&&d.buy){
+        compraPendente=false;
+        const id=Number(d.buy.contract_id);
+        if(!Number.isSafeInteger(id)||id<=0){logAuto("Resposta de compra sem contract_id válido. Robô pausado para segurança.");roboAtivo=false;backendReady=false;if(backendSocket){const s=backendSocket;backendSocket=null;s.onclose=null;try{s.close();}catch(_){}}atualizarPainelAuto();return;}
+        contratoAtivo=true;contratoIdAtivo=id;estadoAuto.operacoes++;
+        backendSocket.send(JSON.stringify({proposal_open_contract:1,contract_id:contratoIdAtivo,subscribe:1,req_id:reqAutoId++}));
+        logAuto("ORDEM DEMO ABERTA: "+(direcaoAtual||"--")+" | contrato #"+contratoIdAtivo+" | stake "+dinheiroAuto(stakeDaEtapa())+".");
+        atualizarPainelAuto();return;
+    }
+    if(d.msg_type==="proposal_open_contract"&&d.proposal_open_contract){
+        const c=d.proposal_open_contract;
+        const status=String(c.status||"").toLowerCase();
+        if(!(c.is_sold||["sold","won","lost"].includes(status)))return;
+        if(contratoIdAtivo&&Number(c.contract_id)!==contratoIdAtivo)return;
+        contratoAtivo=false;contratoIdAtivo=null;
+        const lucro=Number(c.profit||0);
+        if(!Number.isFinite(lucro)){bloquearAuto("A Deriv retornou resultado inválido para o contrato.");return;}
+        estadoAuto.lucroLiquido=Number((estadoAuto.lucroLiquido+lucro).toFixed(2));
+        if(lucro>0){
+            logAuto("WIN DEMO: resultado "+dinheiroAuto(lucro)+". Sequência encerrada; próximo ciclo volta ao inicial.");
+            estadoAuto.gale=0;estadoAuto.sequenciaAtiva=false;estadoAuto.aguardando=false;
+        }else if(lucro<0){
+            logAuto("LOSS DEMO: resultado "+dinheiroAuto(lucro)+". Preparando próximo Gale com direção "+(direcaoAtual||"não definida")+".");
+            if(estadoAuto.gale>=MAX_GALES){bloquearAuto("Limite de 15 Gales atingido após perda.");}
+            else{estadoAuto.gale++;estadoAuto.aguardando=false;if(direcaoAtual&&roboAtivo)agendarEntradaNaProximaM1(direcaoAtual);}
+        }else{
+            logAuto("Resultado zero. Sequência mantida; aguardando novo pré-alerta para definir a próxima entrada.");
+            estadoAuto.aguardando=true;
+        }
+        if(estadoAuto.lucroLiquido>=lerConfigAuto().meta)bloquearAuto("Meta diária líquida atingida.");
+        if(!roboAtivo&&backendSocket){const s=backendSocket;backendSocket=null;backendReady=false;s.onclose=null;try{s.close();}catch(_){}}
+        salvarEstadoAuto();atualizarPainelAuto();return;
+    }
+    if(d.msg_type==="balance"&&d.balance){document.getElementById("backendConta").textContent="DEMO conectada — saldo: "+d.balance.balance+" "+d.balance.currency;}
+}
+function bloquearAuto(motivo){estadoAuto.travado=true;estadoAuto.motivo=motivo;logAuto("ROBÔ BLOQUEADO: "+motivo);pararRoboDemo("Robô pausado por limite de segurança.");}
+function reiniciarContadoresAuto(){if(!confirm("Zerar o resultado e histórico do robô para hoje? Faça isso somente sem contrato aberto."))return;if(contratoAtivo){alert("Existe contrato aberto. Aguarde o resultado antes de reiniciar.");return;}estadoAuto=estadoAutoInicial();direcaoAtual=null;ultimaVelaSinalProcessada=null;atualizarPainelAuto();}
+function verificarDiaAuto(){if(estadoAuto.dia!==chaveDiaAuto()){estadoAuto=estadoAutoInicial();salvarEstadoAuto();}}
+setInterval(()=>{verificarDiaAuto();atualizarPainelAuto();},30000);
+atualizarPainelAuto();
+window.addEventListener("beforeunload", e=>{if(contratoAtivo){e.preventDefault();e.returnValue="Existe uma operação DEMO aberta. Aguarde o encerramento para não perder o acompanhamento.";}});
+
+// Se o usuário já havia conectado antes, tenta retomar ao reabrir/recarregar o site.
+try{
+    if(localStorage.getItem(DERIV_AUTO_KEY) === "1"){
+        reconexaoAtiva = true;
+        conectarDeriv(true);
+    }
+}catch(e){}
+
+</script>
+</body>
+</html>
